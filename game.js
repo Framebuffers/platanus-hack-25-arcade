@@ -1,358 +1,467 @@
-// Platanus Hack 25: Snake Game
-// Navigate the snake around the "PLATANUS HACK ARCADE" title made of blocks!
+// Minimal scaffolding: title screen, grid, scanline, ship movement
 
 const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
   backgroundColor: '#000000',
-  scene: {
-    create: create,
-    update: update
-  }
+  scene: { create, update }
 };
 
 const game = new Phaser.Game(config);
 
-// Game variables
-let snake = [];
-let snakeSize = 15;
-let direction = { x: 1, y: 0 };
-let nextDirection = { x: 1, y: 0 };
-let food;
-let score = 0;
-let scoreText;
-let titleBlocks = [];
-let gameOver = false;
-let moveTimer = 0;
-let moveDelay = 150;
-let graphics;
+let gfx;
+let cursors;
+let wasd;
+let gameState = 'title'; // 'title' or 'level'
+let shipPos = { x: 400, y: 300 };
+let shipVel = { x: 0, y: 0 };
+const GAME_NAME = 'vibebeater';
 
-// Pixel font patterns (5x5 grid for each letter)
-const letters = {
-  P: [[1,1,1,1],[1,0,0,1],[1,1,1,1],[1,0,0,0],[1,0,0,0]],
-  L: [[1,0,0,0],[1,0,0,0],[1,0,0,0],[1,0,0,0],[1,1,1,1]],
-  A: [[0,1,1,0],[1,0,0,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]],
-  T: [[1,1,1,1],[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]],
-  N: [[1,0,0,1],[1,1,0,1],[1,0,1,1],[1,0,0,1],[1,0,0,1]],
-  U: [[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,1,1,1]],
-  S: [[0,1,1,1],[1,0,0,0],[0,1,1,0],[0,0,0,1],[1,1,1,0]],
-  H: [[1,0,0,1],[1,0,0,1],[1,1,1,1],[1,0,0,1],[1,0,0,1]],
-  C: [[0,1,1,1],[1,0,0,0],[1,0,0,0],[1,0,0,0],[0,1,1,1]],
-  K: [[1,0,0,1],[1,0,1,0],[1,1,0,0],[1,0,1,0],[1,0,0,1]],
-  '2': [[1,1,1,0],[0,0,0,1],[0,1,1,0],[1,0,0,0],[1,1,1,1]],
-  '5': [[1,1,1,1],[1,0,0,0],[1,1,1,0],[0,0,0,1],[1,1,1,0]],
-  ':': [[0,0,0,0],[0,1,0,0],[0,0,0,0],[0,1,0,0],[0,0,0,0]],
-  R: [[1,1,1,0],[1,0,0,1],[1,1,1,0],[1,0,1,0],[1,0,0,1]],
-  D: [[1,1,1,0],[1,0,0,1],[1,0,0,1],[1,0,0,1],[1,1,1,0]],
-  E: [[1,1,1,1],[1,0,0,0],[1,1,1,0],[1,0,0,0],[1,1,1,1]]
-};
+// Ship movement parameters (adjustable)
+const SHIP_BASE_SPEED = 5;        // Starting maximum velocity
+const SHIP_MAX_SPEED_CAP = 15;    // Maximum speed cap (progressive ramp stops here)
+const SHIP_SPEED_RAMP_RATE = 0.55; // Speed increase per second
+const SHIP_ACCELERATION = 0.45;    // How fast ship speeds up (0-1, higher = faster)
+const SHIP_FRICTION = 0.45;        // How fast ship slows down (0-1, lower = more friction)
 
-// Bold font for ARCADE (filled/solid style)
-const boldLetters = {
-  A: [[1,1,1,1,1],[1,1,0,1,1],[1,1,1,1,1],[1,1,0,1,1],[1,1,0,1,1]],
-  R: [[1,1,1,1,0],[1,1,0,1,1],[1,1,1,1,0],[1,1,0,1,1],[1,1,0,1,1]],
-  C: [[1,1,1,1,1],[1,1,0,0,0],[1,1,0,0,0],[1,1,0,0,0],[1,1,1,1,1]],
-  D: [[1,1,1,1,0],[1,1,0,1,1],[1,1,0,1,1],[1,1,0,1,1],[1,1,1,1,0]],
-  E: [[1,1,1,1,1],[1,1,0,0,0],[1,1,1,1,0],[1,1,0,0,0],[1,1,1,1,1]]
+// BPM timing
+const BPM = 130;
+const SEC_PER_BEAT = 60 / BPM;
+let beatStartTime = 0;
+
+// Grid settings
+const GRID_COLS = 8;
+const GRID_ROWS = 8;
+const GRID_LINE_WIDTH = 1;
+const SCANLINE_WIDTH = GRID_LINE_WIDTH * 2.5;
+
+// Ray attack system (25% slower = multiply times by 1.25, firing rate 50% slower = 2x intervals)
+const RAY_MIN_BEATS = (1/3) * 1.25;        // Minimum beats for ray growth (1/3 of set amount, 25% slower)
+const RAY_MAX_BEATS = 4 * 1.25;            // Maximum beats for ray growth (25% slower)
+const RAY_MIN_DURATION_BEATS = 2 * 1.25;   // Minimum duration of ray attack (25% slower)
+const RAY_MAX_DURATION_BEATS = 8 * 1.25;   // Maximum duration of ray attack (25% slower)
+const RAY_MIN_SPAWN_INTERVAL = 1 * 1.25 * 2;   // Minimum seconds between ray spawns (25% slower, then 50% slower = 2x)
+const RAY_MAX_SPAWN_INTERVAL = 3 * 1.25 * 2;   // Maximum seconds between ray spawns (25% slower, then 50% slower = 2x)
+const RAY_COOLDOWN_TIME = 5;               // Cooldown in seconds after hitting target
+const RAY_TARGET_OFFSET = 0.35;            // Target offset (35% of way to ship, not direct)
+const RAY_POST_HIT_DURATION_MIN = 3;       // Minimum seconds to keep firing after hit
+const RAY_POST_HIT_DURATION_MAX = 5;       // Maximum seconds to keep firing after hit
+const RAY_MIN_SPAWN_DISTANCE = 150;        // Minimum distance from player for ray origin (pixels)
+const SHIP_COLLISION_RATE = 0.0025;        // Collision area multiplier (0.25% = 0.0025)
+
+let activeRays = [];
+let lastRaySpawnTime = 0;
+let nextRaySpawnTime = 0;
+let rayCooldownEnd = 0;
+
+// Vector font: monospaced characters [x1, y1, x2, y2] in normalized 0-1 coordinates
+const VECTOR_FONT = {
+  'a': [[0,1,0,0],[0,0,0.5,0.25],[0.5,0.25,1,0],[1,0,1,1],[0,0.5,1,0.5]],
+  'b': [[0,0,0,1],[0,0,0.6,0],[0,0.5,0.6,0.5],[0,1,0.6,1],[0.6,0,0.6,0.5],[0.6,0.5,0.6,1]],
+  'e': [[0,0,0.8,0],[0,0,0,1],[0,0.5,0.7,0.5],[0,1,0.8,1]],
+  'i': [[0.5,0,0.5,0.75],[0.3,0.9,0.7,0.9]],
+  'r': [[0,0,0,1],[0,0,0.6,0],[0,0.5,0.6,0.5],[0.6,0,0.6,0.5],[0.6,0.5,1,1]],
+  't': [[0.5,0,0.5,1],[0,0,1,0]],
+  'v': [[0,0,0.5,1],[0.5,1,1,0]]
 };
 
 function create() {
   const scene = this;
-  graphics = this.add.graphics();
+  gfx = scene.add.graphics();
 
-  // Build "PLATANUS HACK ARCADE" in cyan - centered and grid-aligned
-  // PLATANUS: 8 letters × (4 cols + 1 spacing) = 40 blocks, but last letter no spacing = 39 blocks × 15px = 585px
-  let x = Math.floor((800 - 585) / 2 / snakeSize) * snakeSize;
-  let y = Math.floor(180 / snakeSize) * snakeSize;
-  'PLATANUS'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0x00ffff);
-  });
-
-  // HACK: 4 letters × (4 cols + 1 spacing) = 20 blocks, but last letter no spacing = 19 blocks × 15px = 285px
-  x = Math.floor((800 - 285) / 2 / snakeSize) * snakeSize;
-  y = Math.floor(280 / snakeSize) * snakeSize;
-  'HACK'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0x00ffff);
-  });
-
-  // ARCADE: 6 letters × (5 cols + 1 spacing) = 36 blocks, but last letter no spacing = 35 blocks × 15px = 525px
-  x = Math.floor((800 - 525) / 2 / snakeSize) * snakeSize;
-  y = Math.floor(380 / snakeSize) * snakeSize;
-  'ARCADE'.split('').forEach(char => {
-    x = drawLetter(char, x, y, 0xff00ff, true);
-  });
-
-  // Score display
-  scoreText = this.add.text(16, 16, 'Score: 0', {
-    fontSize: '24px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#00ff00'
-  });
-
-  // Instructions
-  this.add.text(400, 560, 'Arrow Keys | Avoid Walls, Yourself & The Title!', {
-    fontSize: '16px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#888888',
-    align: 'center'
-  }).setOrigin(0.5);
-
-  // Initialize snake (start top left)
-  snake = [
-    { x: 75, y: 60 },
-    { x: 60, y: 60 },
-    { x: 45, y: 60 }
-  ];
-
-  // Spawn initial food
-  spawnFood();
-
-  // Keyboard input
-  this.input.keyboard.on('keydown', (event) => {
-    if (gameOver && event.key === 'r') {
-      restartGame(scene);
-      return;
-    }
-
-    if (event.key === 'ArrowUp' && direction.y === 0) {
-      nextDirection = { x: 0, y: -1 };
-    } else if (event.key === 'ArrowDown' && direction.y === 0) {
-      nextDirection = { x: 0, y: 1 };
-    } else if (event.key === 'ArrowLeft' && direction.x === 0) {
-      nextDirection = { x: -1, y: 0 };
-    } else if (event.key === 'ArrowRight' && direction.x === 0) {
-      nextDirection = { x: 1, y: 0 };
+  // Input
+  cursors = scene.input.keyboard.createCursorKeys();
+  wasd = scene.input.keyboard.addKeys('W,S,A,D');
+  
+  // Start on title screen
+  scene.input.keyboard.on('keydown', () => {
+    if (gameState === 'title') {
+      gameState = 'level';
+      beatStartTime = scene.sound.context.currentTime;
+      shipPos = { x: 400, y: 300 }; // Center ship
+      shipVel = { x: 0, y: 0 }; // Reset velocity
+      activeRays = []; // Reset rays
+      lastRaySpawnTime = scene.sound.context.currentTime;
+      nextRaySpawnTime = lastRaySpawnTime + (RAY_MIN_SPAWN_INTERVAL + Math.random() * (RAY_MAX_SPAWN_INTERVAL - RAY_MIN_SPAWN_INTERVAL));
+      rayCooldownEnd = 0; // Reset cooldown
     }
   });
-
-  playTone(this, 440, 0.1);
 }
 
-function drawLetter(char, startX, startY, color, useBold = false) {
-  const pattern = useBold ? boldLetters[char] : letters[char];
-  if (!pattern) return startX + 30;
+function update() {
+  const scene = this;
+  
+  if (gameState === 'title') {
+    drawTitleScreen();
+  } else if (gameState === 'level') {
+    handleShipMovement(scene);
+    drawLevel(scene);
+  }
+}
 
-  for (let row = 0; row < pattern.length; row++) {
-    for (let col = 0; col < pattern[row].length; col++) {
-      if (pattern[row][col]) {
-        const blockX = startX + col * snakeSize;
-        const blockY = startY + row * snakeSize;
-        titleBlocks.push({ x: blockX, y: blockY, color: color });
+function drawTitleScreen() {
+  gfx.clear();
+  gfx.setDefaultStyles({ lineStyle: { width: 2, color: 0x00ffff, alpha: 1 } });
+  drawVectorText(GAME_NAME, 150, 250, 50, 80);
+}
+
+function drawLevel(scene) {
+  gfx.clear();
+  const scanY = getScanlinePosition(scene);
+  updateRays(scene);
+  drawGrid(scanY);
+  drawRays(scene);
+  drawShip();
+}
+
+function getScanlinePosition(scene) {
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  const elapsed = now - beatStartTime;
+  const cycleTime = SEC_PER_BEAT;
+  const progress = (elapsed % cycleTime) / cycleTime;
+  return progress * 600; // height
+}
+
+function drawGrid(scanY) {
+  const width = 800;
+  const height = 600;
+  const cellW = width / GRID_COLS;
+  const cellH = height / GRID_ROWS;
+  const glowRadius = cellH * 0.5;
+  
+  // Gradient colors: top #1ED9C6, bottom #BF048D
+  const topR = 0x1E, topG = 0xD9, topB = 0xC6;
+  const botR = 0xBF, botG = 0x04, botB = 0x8D;
+  
+  // Draw vertical lines with gradient and glow
+  for (let i = 0; i <= GRID_COLS; i++) {
+    const x = i * cellW;
+    // Draw line segment by segment for gradient
+    const segs = 20;
+    for (let s = 0; s < segs; s++) {
+      const y1 = (s / segs) * height;
+      const y2 = ((s + 1) / segs) * height;
+      const midY = (y1 + y2) / 2;
+      const ratio = midY / height;
+      
+      // Calculate glow intensity based on distance from scanline
+      const distFromScan = Math.abs(midY - scanY);
+      const glowIntensity = Math.max(0, 1 - (distFromScan / glowRadius));
+      
+      const r = Math.floor(topR * (1 - ratio) + botR * ratio);
+      const g = Math.floor(topG * (1 - ratio) + botG * ratio);
+      const b = Math.floor(topB * (1 - ratio) + botB * ratio);
+      const baseColor = (r << 16) | (g << 8) | b;
+      
+      // Draw base line
+      gfx.lineStyle(GRID_LINE_WIDTH, baseColor, 1);
+      gfx.beginPath();
+      gfx.moveTo(x, y1);
+      gfx.lineTo(x, y2);
+      gfx.strokePath();
+      
+      // Draw glow if near scanline
+      if (glowIntensity > 0) {
+        const glowWidth = GRID_LINE_WIDTH + (SCANLINE_WIDTH - GRID_LINE_WIDTH) * glowIntensity;
+        const glowAlpha = glowIntensity * 0.9;
+        gfx.lineStyle(glowWidth, baseColor, glowAlpha);
+        gfx.beginPath();
+        gfx.moveTo(x, y1);
+        gfx.lineTo(x, y2);
+        gfx.strokePath();
       }
     }
   }
-  return startX + (pattern[0].length + 1) * snakeSize;
-}
-
-function update(_time, delta) {
-  if (gameOver) return;
-
-  moveTimer += delta;
-  if (moveTimer >= moveDelay) {
-    moveTimer = 0;
-    direction = nextDirection;
-    moveSnake(this);
-  }
-
-  drawGame();
-}
-
-function moveSnake(scene) {
-  const head = snake[0];
-  const newHead = {
-    x: head.x + direction.x * snakeSize,
-    y: head.y + direction.y * snakeSize
-  };
-
-  // Check wall collision
-  if (newHead.x < 0 || newHead.x >= 800 || newHead.y < 0 || newHead.y >= 600) {
-    endGame(scene);
-    return;
-  }
-
-  // Check self collision
-  for (let segment of snake) {
-    if (segment.x === newHead.x && segment.y === newHead.y) {
-      endGame(scene);
-      return;
-    }
-  }
-
-  // Check title block collision
-  for (let block of titleBlocks) {
-    if (newHead.x === block.x && newHead.y === block.y) {
-      endGame(scene);
-      return;
-    }
-  }
-
-  snake.unshift(newHead);
-
-  // Check food collision
-  if (newHead.x === food.x && newHead.y === food.y) {
-    score += 10;
-    scoreText.setText('Score: ' + score);
-    spawnFood();
-    playTone(scene, 880, 0.1);
-
-    if (moveDelay > 80) {
-      moveDelay -= 2;
-    }
-  } else {
-    snake.pop();
-  }
-}
-
-function spawnFood() {
-  let valid = false;
-  let attempts = 0;
-
-  while (!valid && attempts < 100) {
-    attempts++;
-    const gridX = Math.floor(Math.random() * 53) * snakeSize;
-    const gridY = Math.floor(Math.random() * 40) * snakeSize;
-
-    // Check not on snake
-    let onSnake = false;
-    for (let segment of snake) {
-      if (segment.x === gridX && segment.y === gridY) {
-        onSnake = true;
-        break;
-      }
-    }
-
-    // Check not on title blocks
-    let onTitle = false;
-    for (let block of titleBlocks) {
-      if (gridX === block.x && gridY === block.y) {
-        onTitle = true;
-        break;
-      }
-    }
-
-    if (!onSnake && !onTitle) {
-      food = { x: gridX, y: gridY };
-      valid = true;
+  
+  // Draw horizontal lines with gradient and glow
+  for (let i = 0; i <= GRID_ROWS; i++) {
+    const y = i * cellH;
+    const ratio = y / height;
+    
+    // Calculate glow intensity based on distance from scanline
+    const distFromScan = Math.abs(y - scanY);
+    const glowIntensity = Math.max(0, 1 - (distFromScan / glowRadius));
+    
+    const r = Math.floor(topR * (1 - ratio) + botR * ratio);
+    const g = Math.floor(topG * (1 - ratio) + botG * ratio);
+    const b = Math.floor(topB * (1 - ratio) + botB * ratio);
+    const baseColor = (r << 16) | (g << 8) | b;
+    
+    // Draw base line
+    gfx.lineStyle(GRID_LINE_WIDTH, baseColor, 1);
+    gfx.beginPath();
+    gfx.moveTo(0, y);
+    gfx.lineTo(width, y);
+    gfx.strokePath();
+    
+    // Draw glow if near scanline
+    if (glowIntensity > 0) {
+      const glowWidth = GRID_LINE_WIDTH + (SCANLINE_WIDTH - GRID_LINE_WIDTH) * glowIntensity;
+      const glowAlpha = glowIntensity * 0.9;
+      gfx.lineStyle(glowWidth, baseColor, glowAlpha);
+      gfx.beginPath();
+      gfx.moveTo(0, y);
+      gfx.lineTo(width, y);
+      gfx.strokePath();
     }
   }
 }
 
-function drawGame() {
-  graphics.clear();
+function drawShip() {
+  const x = shipPos.x;
+  const y = shipPos.y;
+  const size = 20;
+  
+  gfx.lineStyle(2, 0x00ffff, 1);
+  // Simple triangle ship pointing up
+  gfx.beginPath();
+  gfx.moveTo(x, y - size);
+  gfx.lineTo(x - size * 0.7, y + size * 0.5);
+  gfx.lineTo(x, y);
+  gfx.lineTo(x + size * 0.7, y + size * 0.5);
+  gfx.closePath();
+  gfx.strokePath();
+}
 
-  // Draw title blocks
-  titleBlocks.forEach(block => {
-    graphics.fillStyle(block.color, 1);
-    graphics.fillRect(block.x, block.y, snakeSize - 2, snakeSize - 2);
+function getCurrentMaxSpeed(scene) {
+  if (gameState !== 'level') return SHIP_BASE_SPEED;
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  const elapsed = now - beatStartTime;
+  const speedIncrease = elapsed * SHIP_SPEED_RAMP_RATE;
+  return Math.min(SHIP_BASE_SPEED + speedIncrease, SHIP_MAX_SPEED_CAP);
+}
+
+function handleShipMovement(scene) {
+  const currentMaxSpeed = getCurrentMaxSpeed(scene);
+  
+  // Get input direction
+  let targetVelX = 0;
+  let targetVelY = 0;
+  
+  if (cursors.left.isDown || wasd.A.isDown) targetVelX = -currentMaxSpeed;
+  if (cursors.right.isDown || wasd.D.isDown) targetVelX = currentMaxSpeed;
+  if (cursors.up.isDown || wasd.W.isDown) targetVelY = -currentMaxSpeed;
+  if (cursors.down.isDown || wasd.S.isDown) targetVelY = currentMaxSpeed;
+  
+  // Lerp velocity towards target (acceleration)
+  shipVel.x = shipVel.x + (targetVelX - shipVel.x) * SHIP_ACCELERATION;
+  shipVel.y = shipVel.y + (targetVelY - shipVel.y) * SHIP_ACCELERATION;
+  
+  // Apply friction when no input
+  if (targetVelX === 0) shipVel.x *= SHIP_FRICTION;
+  if (targetVelY === 0) shipVel.y *= SHIP_FRICTION;
+  
+  // Update position
+  shipPos.x = Phaser.Math.Clamp(shipPos.x + shipVel.x, 0, 800);
+  shipPos.y = Phaser.Math.Clamp(shipPos.y + shipVel.y, 0, 600);
+}
+
+function drawVectorText(text, x, y, charWidth, charHeight) {
+  const chars = text.toLowerCase().split('');
+  const spacing = charWidth; // Monospaced
+  
+  chars.forEach((char, idx) => {
+    const lines = VECTOR_FONT[char] || [];
+    drawVectorChar(x + idx * spacing, y, charWidth, charHeight, lines);
   });
-
-  // Draw snake
-  snake.forEach((segment, index) => {
-    if (index === 0) {
-      graphics.fillStyle(0x00ff00, 1);
-    } else {
-      graphics.fillStyle(0x00aa00, 1);
-    }
-    graphics.fillRect(segment.x, segment.y, snakeSize - 2, snakeSize - 2);
-  });
-
-  // Draw food
-  graphics.fillStyle(0xff0000, 1);
-  graphics.fillRect(food.x, food.y, snakeSize - 2, snakeSize - 2);
 }
 
-function endGame(scene) {
-  gameOver = true;
-  playTone(scene, 220, 0.5);
-
-  // Semi-transparent overlay
-  const overlay = scene.add.graphics();
-  overlay.fillStyle(0x000000, 0.7);
-  overlay.fillRect(0, 0, 800, 600);
-
-  // Game Over title with glow effect
-  const gameOverText = scene.add.text(400, 300, 'GAME OVER', {
-    fontSize: '64px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#ff0000',
-    align: 'center',
-    stroke: '#ff6666',
-    strokeThickness: 8
-  }).setOrigin(0.5);
-
-  // Pulsing animation for game over text
-  scene.tweens.add({
-    targets: gameOverText,
-    scale: { from: 1, to: 1.1 },
-    alpha: { from: 1, to: 0.8 },
-    duration: 800,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut'
+function drawVectorChar(x, y, w, h, lines) {
+  gfx.lineStyle(2, 0x00ffff, 1);
+  lines.forEach(line => {
+    const [x1, y1, x2, y2] = line;
+    gfx.beginPath();
+    gfx.moveTo(x + x1 * w, y + y1 * h);
+    gfx.lineTo(x + x2 * w, y + y2 * h);
+    gfx.strokePath();
   });
+}
 
-  // Score display
-  scene.add.text(400, 400, 'SCORE: ' + score, {
-    fontSize: '36px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#00ffff',
-    align: 'center',
-    stroke: '#000000',
-    strokeThickness: 4
-  }).setOrigin(0.5);
+// Ray system functions
+function getGridIntersections() {
+  const width = 800;
+  const height = 600;
+  const cellW = width / GRID_COLS;
+  const cellH = height / GRID_ROWS;
+  const intersections = [];
+  
+  for (let i = 0; i <= GRID_COLS; i++) {
+    for (let j = 0; j <= GRID_ROWS; j++) {
+      intersections.push({ x: i * cellW, y: j * cellH });
+    }
+  }
+  return intersections;
+}
 
-  // Restart instruction with subtle animation
-  const restartText = scene.add.text(400, 480, 'Press R to Restart', {
-    fontSize: '24px',
-    fontFamily: 'Arial, sans-serif',
-    color: '#ffff00',
-    align: 'center',
-    stroke: '#000000',
-    strokeThickness: 3
-  }).setOrigin(0.5);
+function getRandomGridIntersection() {
+  const intersections = getGridIntersections();
+  
+  // Filter out intersections too close to the player
+  const validIntersections = intersections.filter(intersection => {
+    const dx = intersection.x - shipPos.x;
+    const dy = intersection.y - shipPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    return distance >= RAY_MIN_SPAWN_DISTANCE;
+  });
+  
+  // If no valid intersections (unlikely), fall back to all intersections
+  const candidates = validIntersections.length > 0 ? validIntersections : intersections;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
 
-  // Blinking animation for restart text
-  scene.tweens.add({
-    targets: restartText,
-    alpha: { from: 1, to: 0.3 },
-    duration: 600,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut'
+function getShipCollisionRadius() {
+  const shipSize = 20;
+  const shipArea = Math.PI * shipSize * shipSize;
+  const collisionArea = shipArea * (1 + SHIP_COLLISION_RATE);
+  return Math.sqrt(collisionArea / Math.PI);
+}
+
+function spawnRay(scene) {
+  const origin = getRandomGridIntersection();
+  const growthBeats = RAY_MIN_BEATS + Math.random() * (RAY_MAX_BEATS - RAY_MIN_BEATS);
+  const durationBeats = RAY_MIN_DURATION_BEATS + Math.random() * (RAY_MAX_DURATION_BEATS - RAY_MIN_DURATION_BEATS);
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  
+  // Calculate target point offset by 35% from origin towards ship position at moment of firing
+  // This target is fixed and does not follow the player
+  const targetX = origin.x + (shipPos.x - origin.x) * RAY_TARGET_OFFSET;
+  const targetY = origin.y + (shipPos.y - origin.y) * RAY_TARGET_OFFSET;
+  
+  // Calculate angle to fixed target (calculated once at spawn, never updated)
+  const dx = targetX - origin.x;
+  const dy = targetY - origin.y;
+  const angle = Math.atan2(dy, dx);
+  
+  activeRays.push({
+    originX: origin.x,
+    originY: origin.y,
+    angle: angle, // Fixed angle, does not follow player
+    startTime: now,
+    growthBeats: growthBeats,
+    durationBeats: durationBeats,
+    endTime: now + durationBeats * SEC_PER_BEAT,
+    hit: false,
+    hitTime: 0,
+    postHitEndTime: 0
   });
 }
 
 function restartGame(scene) {
-  snake = [
-    { x: 75, y: 60 },
-    { x: 60, y: 60 },
-    { x: 45, y: 60 }
-  ];
-  direction = { x: 1, y: 0 };
-  nextDirection = { x: 1, y: 0 };
-  score = 0;
-  gameOver = false;
-  moveDelay = 150;
-  scoreText.setText('Score: 0');
-  spawnFood();
-  scene.scene.restart();
+  gameState = 'title';
+  shipPos = { x: 400, y: 300 };
+  shipVel = { x: 0, y: 0 };
+  activeRays = [];
+  lastRaySpawnTime = 0;
+  nextRaySpawnTime = 0;
+  beatStartTime = 0;
+  rayCooldownEnd = 0;
 }
 
-function playTone(scene, frequency, duration) {
-  const audioContext = scene.sound.context;
-  const oscillator = audioContext.createOscillator();
-  const gainNode = audioContext.createGain();
+function handleRayHit(ray, scene) {
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  
+  // Mark ray as hit and set post-hit duration
+  if (!ray.hit) {
+    ray.hit = true;
+    ray.hitTime = now;
+    const postHitDuration = RAY_POST_HIT_DURATION_MIN + Math.random() * (RAY_POST_HIT_DURATION_MAX - RAY_POST_HIT_DURATION_MIN);
+    ray.postHitEndTime = now + postHitDuration;
+    
+    // Set cooldown
+    rayCooldownEnd = now + RAY_COOLDOWN_TIME;
+  }
+}
 
-  oscillator.connect(gainNode);
-  gainNode.connect(audioContext.destination);
+function updateRays(scene) {
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  
+  // Spawn new rays (only if not in cooldown)
+  if (now >= nextRaySpawnTime && now >= rayCooldownEnd) {
+    spawnRay(scene);
+    lastRaySpawnTime = now;
+    nextRaySpawnTime = now + (RAY_MIN_SPAWN_INTERVAL + Math.random() * (RAY_MAX_SPAWN_INTERVAL - RAY_MIN_SPAWN_INTERVAL));
+  }
+  
+  // Update existing rays
+  activeRays = activeRays.filter(ray => {
+    // Remove expired rays (after post-hit duration if hit, otherwise after normal duration)
+    const finalEndTime = ray.hit ? ray.postHitEndTime : ray.endTime;
+    if (now >= finalEndTime) return false;
+    
+    // Angle is fixed at spawn, does not follow player
+    
+    // Check collision (only if not already hit)
+    if (!ray.hit) {
+      const elapsed = now - ray.startTime;
+      const growthProgress = Math.min(1, elapsed / (ray.growthBeats * SEC_PER_BEAT));
+      const currentLength = Math.pow(growthProgress, 2) * 2000; // Exponential growth
+      
+      const endX = ray.originX + Math.cos(ray.angle) * currentLength;
+      const endY = ray.originY + Math.sin(ray.angle) * currentLength;
+      
+      if (checkRayCollision(ray.originX, ray.originY, endX, endY)) {
+        // Collision detected - mark as hit and continue firing
+        handleRayHit(ray, scene);
+      }
+    }
+    
+    return true;
+  });
+}
 
-  oscillator.frequency.value = frequency;
-  oscillator.type = 'square';
+function checkRayCollision(rayX1, rayY1, rayX2, rayY2) {
+  const shipRadius = getShipCollisionRadius();
+  const shipX = shipPos.x;
+  const shipY = shipPos.y;
+  
+  // Check if ray segment intersects with ship's collision circle
+  // Using point-to-line-segment distance
+  const dx = rayX2 - rayX1;
+  const dy = rayY2 - rayY1;
+  const lengthSq = dx * dx + dy * dy;
+  
+  if (lengthSq === 0) {
+    // Ray is a point
+    const dist = Math.sqrt((shipX - rayX1) ** 2 + (shipY - rayY1) ** 2);
+    return dist <= shipRadius;
+  }
+  
+  // Project ship position onto ray
+  const t = Math.max(0, Math.min(1, ((shipX - rayX1) * dx + (shipY - rayY1) * dy) / lengthSq));
+  const projX = rayX1 + t * dx;
+  const projY = rayY1 + t * dy;
+  
+  // Check distance from ship to projected point
+  const dist = Math.sqrt((shipX - projX) ** 2 + (shipY - projY) ** 2);
+  return dist <= shipRadius;
+}
 
-  gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
-
-  oscillator.start(audioContext.currentTime);
-  oscillator.stop(audioContext.currentTime + duration);
+function drawRays(scene) {
+  const ac = scene.sound.context;
+  const now = ac.currentTime;
+  
+  activeRays.forEach(ray => {
+    const elapsed = now - ray.startTime;
+    const growthProgress = Math.min(1, elapsed / (ray.growthBeats * SEC_PER_BEAT));
+    
+    // Exponential growth: progress^2
+    const currentLength = Math.pow(growthProgress, 2) * 2000;
+    
+    const endX = ray.originX + Math.cos(ray.angle) * currentLength;
+    const endY = ray.originY + Math.sin(ray.angle) * currentLength;
+    
+    // Draw ray - red if hit, white otherwise
+    const rayColor = ray.hit ? 0xff0000 : 0xffffff;
+    gfx.lineStyle(2, rayColor, 1);
+    gfx.beginPath();
+    gfx.moveTo(ray.originX, ray.originY);
+    gfx.lineTo(endX, endY);
+    gfx.strokePath();
+  });
 }
