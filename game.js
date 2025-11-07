@@ -1,4 +1,4 @@
-// Stage 2: Game Over State and P2 Join
+// Stage 3: Music Engine (Tracker-Style)
 
 const config = {
   type: Phaser.AUTO,
@@ -26,9 +26,42 @@ const SHIP_ACCELERATION = 0.45;
 const SHIP_FRICTION = 0.45;
 const SHIP_COLLISION_RATE = 0.0025; 
 
+// Ray safe zone settings (10% of SHIP_DIAMETER)
+const SHIP_DIAMETER = SHIP_SIZE * 2; // 40 pixels
+const MIN_SAFE_GAP = SHIP_DIAMETER * 0.1; // 4 pixels
+
 // BPM timing
 const BPM = 130;
 const SEC_PER_BEAT = 60 / BPM;
+
+// Music Engine Settings
+const NOTE_RESOLUTION = 8; // Steps per bar (1/8th notes)
+const SEC_PER_STEP = SEC_PER_BEAT / NOTE_RESOLUTION; // Time per step
+const BASE_FREQUENCY = 440; // A4
+const SCALE = [0, 2, 3, 5, 7, 8, 10, 12]; // Minor scale in semitones (0=A, 2=B, 3=C, etc.)
+
+// Music Data: PATTERNS (The "Bars")
+// Structure: {s: step_index (0-7), p: pitch_index (0-7), d: duration_steps (1-8), c: is_change_point (bool)}
+const PATTERNS = [
+  // Pattern 0: Kick on every quarter note (steps 0, 2, 4, 6)
+  [{s: 0, p: 0, d: 1, c: false}, {s: 2, p: 0, d: 1, c: false}, {s: 4, p: 0, d: 1, c: false}, {s: 6, p: 0, d: 1, c: false}],
+];
+
+// Music Data: SONG_SEQUENCE (The "Composition")
+// Structure: [PATTERN_ID, REPETITIONS, BASE_CHANNEL_INDEX]
+const SONG_SEQUENCE = [
+  [0, 16, 0], // Pattern 0 (Kick), 16 bars, Channel 0
+];
+
+// Instruments (ADSR implemented via AudioParam)
+const INSTRUMENTS = [
+  // 0: Kick (Triangle, fast attack/decay)
+  { wave: 'triangle', volume: 0.8, attack: 0.001, decay: 0.15, sustain: 0, release: 0.01 },
+  // 1: Lead Square (standard) - Placeholder for future use
+  { wave: 'square', volume: 0.4, attack: 0.05, decay: 0.2, sustain: 0.5, release: 0.1 },
+  // 3: Unused Placeholder
+  { wave: 'square', volume: 0.6, attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.1 },
+];
 
 // Grid settings
 const GRID_COLS = 8;
@@ -49,11 +82,11 @@ const RAY_MIN_BEATS = (1/3) * 1.25;
 const RAY_MAX_BEATS = 4 * 1.25;
 const RAY_MIN_DURATION_BEATS = 2 * 1.25;
 const RAY_MAX_DURATION_BEATS = 8 * 1.25;
-const RAY_MIN_SPAWN_INTERVAL = 1 * 1.25 * 2;
-const RAY_MAX_SPAWN_INTERVAL = 3 * 1.25 * 2;
+// Spawn interval set to minimum 1 bar (4 beats) and maximum 4 bars (16 beats)
+const RAY_MIN_SPAWN_INTERVAL_BEATS = 4;
+const RAY_MAX_SPAWN_INTERVAL_BEATS = 16;
 const RAY_MIN_SPAWN_DISTANCE = 150;
-const RAY_MIN_SAFE_CELLS = 2;
-const RAY_MAX_LENGTH = 3000; 
+const RAY_MAX_LENGTH = 3000; // Ensures ray extends beyond screen bounds
 const RAY_LINE_WIDTH = 2;
 const RAY_COLLISION_OFFSET = 8; 
 const RAY_COLOR_NORMAL = 0xffffff;
@@ -97,6 +130,34 @@ let activeRays = [];
 let lastRaySpawnTime = 0;
 let nextRaySpawnTime = 0;
 let hittingRay = null;
+
+// Ray Pattern Management
+let DEFAULT_RAY_ORIGINS = []; // All grid intersections, initialized in create
+const RAY_PATTERNS = [
+  // Pattern 0: Uses all grid intersections as potential origins
+  { name: 'FullGrid', originPool: DEFAULT_RAY_ORIGINS },
+];
+
+let rayPatternState = {
+  patternIndex: 0,
+  lastPatternChange: 0,
+  minDurationBeats: 16, // Minimum duration of a pattern before it can change (4 bars)
+};
+
+
+// === MUSIC STATE ===
+let audioContext;
+let masterGain;
+let channels = []; // Stores gain nodes and instrument definitions
+let sequenceState = {
+  sequenceIndex: 0, // Index into SONG_SEQUENCE
+  barInSequence: 0, // Repetition count of the current sequence item
+  stepInBar: 0,     // Current step (0 to NOTE_RESOLUTION-1)
+  jumpWaitBars: 0,  // Bars to wait before executing a jump
+  jumpTargetIndex: -1, // The target index in SONG_SEQUENCE
+};
+let isPlayerPressing = false; // Flag for player input
+let lastStepTime = 0; // Time the last note step was processed
 
 
 // === VECTOR FONT ===
@@ -142,22 +203,45 @@ function create() {
   ship1Score = 0;
   ship2Active = false;
   
+  // Initialize Ray Pattern Origins
+  DEFAULT_RAY_ORIGINS = generateAllGridIntersections();
+  RAY_PATTERNS[0].originPool = DEFAULT_RAY_ORIGINS;
+  
+  // Audio must be initialized here
+  initAudio(scene);
+  
   // Only handle starting the game from the title screen
   scene.input.keyboard.on('keydown', () => {
     if (gameState === 'title') {
       gameState = 'level';
       beatStartTime = scene.sound.context.currentTime;
+      lastStepTime = beatStartTime; // Initialize sequencer time
       shipPos = { x: SHIP_START_X, y: SHIP_START_Y };
       shipVel = { x: 0, y: 0 };
       activeRays = [];
+      
+      const minSecs = RAY_MIN_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+      const maxSecs = RAY_MAX_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+
       lastRaySpawnTime = scene.sound.context.currentTime;
-      nextRaySpawnTime = lastRaySpawnTime + (RAY_MIN_SPAWN_INTERVAL + Math.random() * (RAY_MAX_SPAWN_INTERVAL - RAY_MIN_SPAWN_INTERVAL));
+      // Schedule initial spawn time based on new constants
+      nextRaySpawnTime = lastRaySpawnTime + (minSecs + Math.random() * (maxSecs - minSecs));
     }
   });
 }
 
 function update() {
   const scene = this;
+  
+  // Check player input for music interaction
+  isPlayerPressing = cursors.left.isDown || cursors.right.isDown || cursors.up.isDown || cursors.down.isDown ||
+                     wasd.W.isDown || wasd.S.isDown || wasd.A.isDown || wasd.D.isDown ||
+                     wasd.pad2_up.isDown || wasd.pad2_down.isDown || wasd.pad2_left.isDown || wasd.pad2_right.isDown;
+  
+  if (gameState === 'level' || gameState === 'gameover') {
+    // Sequencer runs continuously in level and gameover state for atmosphere
+    processSequencerStep(scene);
+  }
   
   // P2 Join check
   if (gameState === 'level' && !ship2Active) {
@@ -183,6 +267,161 @@ function update() {
   }
 }
 
+// === MUSIC ENGINE ===
+
+function initAudio(scene) {
+  audioContext = scene.sound.context;
+  masterGain = audioContext.createGain();
+  masterGain.gain.setValueAtTime(0.5, audioContext.currentTime); // Master Volume
+  masterGain.connect(audioContext.destination);
+
+  // Initialize 4 channels (0: Triangle, 1-3: Square)
+  for (let i = 0; i < 4; i++) {
+    const instrument = INSTRUMENTS[i] || INSTRUMENTS[1];
+    const type = (i === 0) ? 'triangle' : 'square';
+    const gainNode = audioContext.createGain();
+    gainNode.connect(masterGain);
+    channels.push({
+      type: type,
+      gainNode: gainNode,
+      instrument: instrument
+    });
+  }
+}
+
+function noteToFrequency(noteIndex) {
+  if (noteIndex === 0) return 60; // Fixed kick frequency
+  
+  // Map index (1-8) to scale degree, add octave offset (e.g., +24 semitones for C4)
+  const octaveOffset = 24; 
+  const scaleDegree = SCALE[noteIndex % SCALE.length];
+  const midiNote = 60 + octaveOffset + scaleDegree; 
+  return BASE_FREQUENCY * Math.pow(2, (midiNote - 69) / 12);
+}
+
+function triggerNote(channelIndex, noteIndex, durationSecs) {
+  const channel = channels[channelIndex];
+  const instrument = channel.instrument;
+  const now = audioContext.currentTime;
+
+  // Create oscillator
+  const osc = audioContext.createOscillator();
+  osc.type = channel.type;
+  
+  // Calculate and set frequency
+  const freq = noteToFrequency(noteIndex);
+  osc.frequency.setValueAtTime(freq, now);
+
+  // Connect and start
+  const noteGain = audioContext.createGain();
+  noteGain.gain.setValueAtTime(0.0001, now); 
+  
+  osc.connect(noteGain).connect(channel.gainNode);
+
+  // --- ADSR Envelope ---
+  const gain = noteGain.gain;
+  
+  // Attack
+  gain.linearRampToValueAtTime(instrument.volume, now + instrument.attack);
+  
+  // Decay (to Sustain level)
+  const sustainLevel = instrument.volume * instrument.sustain;
+  gain.linearRampToValueAtTime(sustainLevel, now + instrument.attack + instrument.decay);
+
+  // Note OFF time (duration of the note)
+  const noteOffTime = now + durationSecs;
+
+  // Release
+  gain.setValueAtTime(sustainLevel, noteOffTime); // Hold sustain until note off
+  gain.linearRampToValueAtTime(0.0001, noteOffTime + instrument.release);
+
+  osc.start(now);
+  // Ensure the oscillator stops slightly after the release phase is complete
+  osc.stop(noteOffTime + instrument.release + 0.05); 
+}
+
+function processSequencerStep(scene) {
+  const now = scene.sound.context.currentTime;
+  
+  // Check if enough time has passed since the last step (quantization)
+  if (now < lastStepTime + SEC_PER_STEP) {
+    return;
+  }
+  
+  // Use the calculated time for note precision
+  const triggerTime = lastStepTime + SEC_PER_STEP; 
+  lastStepTime = triggerTime;
+
+  // 1. Handle Jump Queue
+  if (sequenceState.jumpWaitBars > 0) {
+    if (sequenceState.stepInBar === 0) { // Start of a new bar (Bar 0 step)
+      sequenceState.jumpWaitBars--;
+      if (sequenceState.jumpWaitBars === 0 && sequenceState.jumpTargetIndex !== -1) {
+        // EXECUTE JUMP
+        sequenceState.sequenceIndex = sequenceState.jumpTargetIndex;
+        sequenceState.barInSequence = 0;
+        sequenceState.jumpTargetIndex = -1;
+      }
+    }
+  }
+
+  // 2. Get Current Pattern Step Data
+  const currentSeq = SONG_SEQUENCE[sequenceState.sequenceIndex];
+  const baseChannelIndex = currentSeq[2];
+  const patternId = currentSeq[0];
+  const repetitions = currentSeq[1];
+  const pattern = PATTERNS[patternId];
+  
+  // 3. Trigger Notes for Current Step
+  const currentStep = sequenceState.stepInBar;
+  
+  pattern.filter(noteData => noteData.s === currentStep).forEach(noteData => {
+    const pitchIndex = noteData.p;
+    const durationSteps = noteData.d; 
+    const durationSecs = durationSteps * SEC_PER_STEP;
+    
+    // Only trigger if pitch is not 0 (which is used for the kick channel)
+    if (pitchIndex !== 'R') { 
+      triggerNote(baseChannelIndex, pitchIndex, durationSecs);
+    }
+
+    // 4. Check for Change Point and Player Input
+    if (noteData.c && isPlayerPressing && sequenceState.jumpWaitBars === 0) {
+      
+      // Select a new random target bar (avoid repeating the current one)
+      let nextIndex = sequenceState.sequenceIndex;
+      if (SONG_SEQUENCE.length > 1) {
+        let attempts = 0;
+        do {
+          nextIndex = Math.floor(Math.random() * SONG_SEQUENCE.length);
+          attempts++;
+        } while(nextIndex === sequenceState.sequenceIndex && attempts < 10);
+      }
+      
+      // Queue the jump after a random number of bars (1-4)
+      sequenceState.jumpWaitBars = Phaser.Math.Between(1, 4);
+      sequenceState.jumpTargetIndex = nextIndex;
+    }
+  });
+
+  // 5. Advance Sequencer
+  sequenceState.stepInBar++;
+  
+  if (sequenceState.stepInBar >= NOTE_RESOLUTION) {
+    sequenceState.stepInBar = 0;
+    sequenceState.barInSequence++;
+    
+    // Check if repetition is complete
+    if (sequenceState.barInSequence >= repetitions) {
+      sequenceState.barInSequence = 0;
+      
+      // Advance to the next item in the SONG_SEQUENCE
+      sequenceState.sequenceIndex = (sequenceState.sequenceIndex + 1) % SONG_SEQUENCE.length;
+    }
+  }
+}
+
+
 // === GAME OVER LOGIC ===
 
 /**
@@ -206,8 +445,22 @@ function handleRayHit(ray, scene) {
         
         // Restart beat and ray timers for the new round
         beatStartTime = scene.sound.context.currentTime; 
+        
+        const minSecs = RAY_MIN_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+        const maxSecs = RAY_MAX_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+        
         lastRaySpawnTime = scene.sound.context.currentTime;
-        nextRaySpawnTime = lastRaySpawnTime + (RAY_MIN_SPAWN_INTERVAL + Math.random() * (RAY_MAX_SPAWN_INTERVAL - RAY_MIN_SPAWN_INTERVAL));
+        nextRaySpawnTime = lastRaySpawnTime + (minSecs + Math.random() * (maxSecs - minSecs));
+        
+        // Reset music sequencer for a fresh start
+        lastStepTime = beatStartTime;
+        sequenceState = {
+          sequenceIndex: 0,
+          barInSequence: 0,
+          stepInBar: 0,
+          jumpWaitBars: 0,
+          jumpTargetIndex: -1,
+        };
       }
     });
   }
@@ -420,9 +673,21 @@ function handleShipMovement(scene) {
 }
 
 function getShipCollisionRadius() {
-  const shipArea = Math.PI * SHIP_SIZE * SHIP_SIZE;
-  const collisionArea = shipArea * (1 + SHIP_COLLISION_RATE);
-  return Math.sqrt(collisionArea / Math.PI);
+  // A rough approximation of the triangle's minimum distance from center
+  const baseArea = SHIP_SIZE * (SHIP_SIZE * 0.7 * 2) * 0.5; 
+  // Simplified calculation for bounding circle radius (approx 11.5 from center to side)
+  return SHIP_SIZE * 0.7; // ~14 pixels, closer to the actual bounding radius
+}
+
+/**
+ * Calculates the minimum required distance from the center of a player
+ * to the ray's infinite line, ensuring the collision margin (RAY_COLLISION_OFFSET)
+ * plus the user-defined safe gap (MIN_SAFE_GAP) is respected.
+ */
+function getMinRequiredSeparation() {
+  const shipRadius = getShipCollisionRadius(); 
+  // Total effective collision buffer: ship radius + ray offset + 10% safety gap
+  return shipRadius + RAY_COLLISION_OFFSET + MIN_SAFE_GAP;
 }
 
 // === VECTOR TEXT UTILITIES ===
@@ -462,8 +727,12 @@ function drawCenteredVectorText(text, w, h, yOffset, alpha = 1) {
   drawVectorText(text, x, y, w, h, alpha);
 }
 
-// === RAY SYSTEM ===
-function getGridIntersections() {
+// === RAY SYSTEM - Pattern Logic Extracted ===
+
+/**
+ * Generates all possible grid intersection points.
+ */
+function generateAllGridIntersections() {
   const intersections = [];
   
   for (let i = 0; i <= GRID_COLS; i++) {
@@ -474,67 +743,105 @@ function getGridIntersections() {
   return intersections;
 }
 
-function isInLineOfSight(origin, pos) {
-  const dx = Math.abs(origin.x - pos.x);
-  const dy = Math.abs(origin.y - pos.y);
+/**
+ * Selects a random, collision-safe origin from the provided pool based on player positions.
+ */
+function getRandomOriginFromPool(originPool) {
+  const minDistance = RAY_MIN_SPAWN_DISTANCE; 
   
-  const cellsAwayX = dx / GRID_CELL_WIDTH;
-  const cellsAwayY = dy / GRID_CELL_HEIGHT;
-  
-  return cellsAwayX < RAY_MIN_SAFE_CELLS || cellsAwayY < RAY_MIN_SAFE_CELLS;
-}
-
-function getRandomGridIntersection() {
-  const intersections = getGridIntersections();
-  
-  // Check against P1
-  let validIntersections = intersections.filter(intersection => {
-    const dx = intersection.x - shipPos.x;
-    const dy = intersection.y - shipPos.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
+  // Filter origins that are far enough from both players
+  let validOrigins = originPool.filter(origin => {
+    const distP1 = Math.hypot(origin.x - shipPos.x, origin.y - shipPos.y);
     
-    return distance >= RAY_MIN_SPAWN_DISTANCE && !isInLineOfSight(intersection, shipPos);
+    if (distP1 < minDistance) return false;
+    
+    if (ship2Active) {
+      const distP2 = Math.hypot(origin.x - ship2Pos.x, origin.y - ship2Pos.y);
+      if (distP2 < minDistance) return false;
+    }
+    
+    return true; 
   });
   
-  // If P2 is active, filter again against P2
-  if (ship2Active) {
-    validIntersections = validIntersections.filter(intersection => {
-      const dx = intersection.x - ship2Pos.x;
-      const dy = intersection.y - ship2Pos.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      return distance >= RAY_MIN_SPAWN_DISTANCE && !isInLineOfSight(intersection, ship2Pos);
-    });
-  }
+  // Fallback: If no truly safe origin is found, use any from the pattern's pool.
+  const candidates = validOrigins.length > 0 ? validOrigins : originPool;
   
-  const candidates = validIntersections.length > 0 ? validIntersections : intersections;
+  if (candidates.length === 0) return null; 
+  
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-function spawnRay(scene) {
-  const origin = getRandomGridIntersection();
-  const growthBeats = RAY_MIN_BEATS + Math.random() * (RAY_MAX_BEATS - RAY_MIN_BEATS);
-  const durationBeats = RAY_MIN_DURATION_BEATS + Math.random() * (RAY_MAX_DURATION_BEATS - RAY_MIN_DURATION_BEATS);
-  const now = scene.sound.context.currentTime;
+/**
+ * Checks if the ray defined by origin and angle maintains the required minimum
+ * separation distance from the player's center.
+ */
+function isAngleSafeForPlayer(originX, originY, angle, shipX, shipY) {
+  const minDistance = getMinRequiredSeparation();
   
-  // Target P1 by default, or P2 if P1 is far and P2 is closer
-  let targetPos = shipPos;
-  if (ship2Active) {
-    const distP1 = Math.hypot(shipPos.x - origin.x, shipPos.y - origin.y);
-    const distP2 = Math.hypot(ship2Pos.x - origin.x, ship2Pos.y - origin.y);
-    if (distP2 < distP1) {
-      targetPos = ship2Pos;
+  // Vector from origin to ship
+  const dx = shipX - originX;
+  const dy = shipY - originY;
+  
+  // 1. Calculate distance from ship (point) to the infinite line (ray)
+  // Line definition: Ax + By + C = 0, where A=sin(angle), B=-cos(angle)
+  const A = Math.sin(angle);
+  const B = -Math.cos(angle);
+  const C = -A * originX - B * originY;
+  
+  // Distance = |A*shipX + B*shipY + C| / 1 (since A^2+B^2=1)
+  const distanceToLine = Math.abs(A * shipX + B * shipY + C);
+
+  // The ray is unsafe if the distance to the line is less than the required separation.
+  return distanceToLine >= minDistance;
+}
+
+function spawnRay(scene) {
+  const currentPattern = RAY_PATTERNS[rayPatternState.patternIndex];
+  const origin = getRandomOriginFromPool(currentPattern.originPool); 
+  
+  if (!origin) return; 
+
+  const now = scene.sound.context.currentTime;
+
+  // --- Find a safe angle ---
+  const SAFE_ANGLE_INCREMENT = Math.PI / 18; // 10 degrees in radians
+  let safeAngles = [];
+  
+  // Iterate through 36 angles (0 to 350 degrees)
+  for (let i = 0; i < 36; i++) {
+    const candidateAngle = i * SAFE_ANGLE_INCREMENT;
+    
+    // Check safety for P1
+    let isSafe = isAngleSafeForPlayer(origin.x, origin.y, candidateAngle, shipPos.x, shipPos.y);
+    
+    // Check safety for P2 if active
+    if (ship2Active && isSafe) {
+      isSafe = isAngleSafeForPlayer(origin.x, origin.y, candidateAngle, ship2Pos.x, ship2Pos.y);
+    }
+    
+    if (isSafe) {
+      safeAngles.push(candidateAngle);
     }
   }
+  
+  // If no safe angle is found, skip spawning the ray this frame.
+  if (safeAngles.length === 0) {
+    // If we can't find a safe angle, reset the timer to try again very soon
+    lastRaySpawnTime = now;
+    nextRaySpawnTime = now + 0.1; 
+    return; 
+  }
+  
+  // Pick a random safe angle
+  const angle = safeAngles[Math.floor(Math.random() * safeAngles.length)];
 
-  const dx = targetPos.x - origin.x;
-  const dy = targetPos.y - origin.y;
-  const angle = Math.atan2(dy, dx);
+  const growthBeats = RAY_MIN_BEATS + Math.random() * (RAY_MAX_BEATS - RAY_MIN_BEATS);
+  const durationBeats = RAY_MIN_DURATION_BEATS + Math.random() * (RAY_MAX_DURATION_BEATS - RAY_MIN_DURATION_BEATS);
   
   activeRays.push({
     originX: origin.x,
     originY: origin.y,
-    angle: angle, // Store the fixed angle
+    angle: angle, // Use the safe, fixed angle. It does not track the player.
     startTime: now,
     growthBeats: growthBeats,
     durationBeats: durationBeats,
@@ -546,10 +853,14 @@ function spawnRay(scene) {
 function updateRays(scene) {
   const now = scene.sound.context.currentTime;
   
+  const minSecs = RAY_MIN_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+  const maxSecs = RAY_MAX_SPAWN_INTERVAL_BEATS * SEC_PER_BEAT;
+  
   if (now >= nextRaySpawnTime && gameState === 'level') {
     spawnRay(scene);
     lastRaySpawnTime = now;
-    nextRaySpawnTime = now + (RAY_MIN_SPAWN_INTERVAL + Math.random() * (RAY_MAX_SPAWN_INTERVAL - RAY_MIN_SPAWN_INTERVAL));
+    // Schedule next spawn based on new beat constants
+    nextRaySpawnTime = now + (minSecs + Math.random() * (maxSecs - minSecs));
   }
   
   activeRays = activeRays.filter(ray => {
@@ -559,8 +870,10 @@ function updateRays(scene) {
     // Calculate current ray geometry (required for collision check below)
     const elapsed = now - ray.startTime;
     const growthProgress = Math.min(1, elapsed / (ray.growthBeats * SEC_PER_BEAT));
-    const currentLength = Math.pow(growthProgress, 2) * RAY_MAX_LENGTH;
+    // The ray should always extend fully beyond the screen when growthProgress is 1
+    const currentLength = Math.pow(growthProgress, 2) * RAY_MAX_LENGTH; 
     
+    // Use the fixed angle (ray.angle)
     const endX = ray.originX + Math.cos(ray.angle) * currentLength;
     const endY = ray.originY + Math.sin(ray.angle) * currentLength;
     
@@ -568,7 +881,7 @@ function updateRays(scene) {
     if (gameState === 'level' && !ray.hit) {
       
       // Check for collision throughout the ray's growth phase (while length is increasing)
-      if (growthProgress < 1) { 
+      if (growthProgress > 0) { 
         // Check P1
         if (checkRayCollision(ray.originX, ray.originY, endX, endY, shipPos.x, shipPos.y)) {
           handleRayHit(ray, scene); // Pass scene here
@@ -599,6 +912,7 @@ function checkRayCollision(rayX1, rayY1, rayX2, rayY2, shipX, shipY) {
     return dist <= totalCollisionRadius;
   }
   
+  // Calculate point on the ray line segment closest to the ship
   const t = Math.max(0, Math.min(1, ((shipX - rayX1) * dx + (shipY - rayY1) * dy) / lengthSq));
   const projX = rayX1 + t * dx;
   const projY = rayY1 + t * dy;
@@ -617,6 +931,7 @@ function drawRays(scene) {
     const growthProgress = Math.min(1, elapsed / (ray.growthBeats * SEC_PER_BEAT));
     const currentLength = Math.pow(growthProgress, 2) * RAY_MAX_LENGTH;
     
+    // Use the fixed ray.angle to calculate the endpoint
     const endX = ray.originX + Math.cos(ray.angle) * currentLength;
     const endY = ray.originY + Math.sin(ray.angle) * currentLength;
     
