@@ -84,18 +84,19 @@ const DIAGONAL_COLOR_CHARGING = 0xFFFFFF;
 const DIAGONAL_COLOR_LETHAL = 0xFF0000;
 const DIAGONAL_GLOW_MULTIPLIER = 5;
 const DIAGONAL_ATTACK_INTERVAL_BEATS = 8; // Spawn every 2 bars
+const DIAGONAL_EXPLOSION_FADE_TIME = 1.0; // Ray explosion fade duration in seconds
+const DIAGONAL_EXPLOSION_SIZE_MULTIPLIER = 3.0; // 300% size for explosion
 
 // ============================================================================
 // GLOBAL CONSTANTS - GRID CELL ATTACK
 // ============================================================================
 const CELL_TELEGRAPH_BEATS = 2; // Warning phase duration
-const CELL_ACTIVE_BEATS = 1; // Lethal phase duration
+const CELL_ACTIVE_BEATS = 0.1; // Lethal phase duration (instant)
 const CELL_TELEGRAPH_COLOR = 0xFFFF00; // Yellow warning
 const CELL_ACTIVE_COLOR = 0xFF0000; // Red lethal
+const CELL_GLOW_COLOR = 0xFF6600; // Orange glow
 const CELL_ATTACK_INTERVAL_BEATS = 12; // Spawn every 1.5 bars
-const CELL_PARTICLE_COUNT = 8; // Particles per explosion
-const CELL_PARTICLE_SPEED = 150; // Pixels per second
-const CELL_PARTICLE_LIFE = 0.6; // Seconds
+const CELL_GLOW_FADE_TIME = 1.0; // Glow fade duration in seconds
 
 // ============================================================================
 // GLOBAL CONSTANTS - TRANSITIONS
@@ -151,6 +152,8 @@ let activeAttacks = [];
 let nextAttackTime = 0;
 let nextCellAttackTime = 0;
 let activeParticles = [];
+let activeGlows = []; // Glowing tile effects
+let activeRayExplosions = []; // Ray explosion effects
 
 // ============================================================================
 // VECTOR FONT DATA
@@ -238,6 +241,8 @@ function update() {
     updatePlayer(scene);
     updateAttacks(scene, now);
     updateParticles(now);
+    updateGlows(now);
+    updateRayExplosions(now);
 
     // Loop music patterns every STEM_DURATION seconds
     if (now - musicStartTime >= STEM_DURATION) {
@@ -265,6 +270,8 @@ function startGame(scene) {
   shipVel = { x: 0, y: 0 };
   activeAttacks = [];
   activeParticles = [];
+  activeGlows = [];
+  activeRayExplosions = [];
 
   nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
   nextCellAttackTime = now + (CELL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
@@ -437,7 +444,14 @@ function updateDiagonalLineAttack(attack, scene, now) {
   const chargeTime = DIAGONAL_CHARGE_BEATS * SEC_PER_BEAT;
   const totalDuration = fadeInTime + chargeTime;
 
-  if (elapsed >= totalDuration) return false;
+  if (elapsed >= totalDuration) {
+    // Spawn explosion when ray completes
+    if (!attack.exploded) {
+      spawnRayExplosion(attack, now);
+      attack.exploded = true;
+    }
+    return false;
+  }
 
   // Calculate opacity to check if ray is red
   let opacity = 0;
@@ -565,15 +579,27 @@ function checkDiagonalLineCollision(attack) {
 
 function calculateDiagonalLineExtents(attack) {
   const angle = attack.angle;
-  
+
   // Extend line to screen borders
   const maxDist = Math.sqrt(SCREEN_WIDTH * SCREEN_WIDTH + SCREEN_HEIGHT * SCREEN_HEIGHT);
-  
+
   const x1 = attack.originX - Math.cos(angle) * maxDist;
   const y1 = attack.originY - Math.sin(angle) * maxDist;
   const x2 = attack.originX + Math.cos(angle) * maxDist;
   const y2 = attack.originY + Math.sin(angle) * maxDist;
-  
+
+  return { x1, y1, x2, y2 };
+}
+
+function calculateDiagonalLineExtentsFromData(originX, originY, angle) {
+  // Extend line to screen borders
+  const maxDist = Math.sqrt(SCREEN_WIDTH * SCREEN_WIDTH + SCREEN_HEIGHT * SCREEN_HEIGHT);
+
+  const x1 = originX - Math.cos(angle) * maxDist;
+  const y1 = originY - Math.sin(angle) * maxDist;
+  const x2 = originX + Math.cos(angle) * maxDist;
+  const y2 = originY + Math.sin(angle) * maxDist;
+
   return { x1, y1, x2, y2 };
 }
 
@@ -591,6 +617,8 @@ function render(scene, now) {
   
   renderGrid();
   renderAttacks(scene, now);
+  renderGlows(now);
+  renderRayExplosions(now);
   renderParticles(now);
   renderShip();
   renderScore();
@@ -931,22 +959,26 @@ function checkCellCollision(attack) {
 }
 
 // ============================================================================
-// PARTICLE SYSTEM
+// GLOW SYSTEM
 // ============================================================================
 function spawnCellExplosion(attack) {
-  const centerX = (attack.col + 0.5) * GRID_CELL_WIDTH;
-  const centerY = (attack.row + 0.5) * GRID_CELL_HEIGHT;
+  const explosionTime = attack.startTime + (CELL_TELEGRAPH_BEATS * SEC_PER_BEAT);
 
-  for (let i = 0; i < CELL_PARTICLE_COUNT; i++) {
-    const angle = (i / CELL_PARTICLE_COUNT) * Math.PI * 2;
-    activeParticles.push({
-      x: centerX,
-      y: centerY,
-      vx: Math.cos(angle) * CELL_PARTICLE_SPEED,
-      vy: Math.sin(angle) * CELL_PARTICLE_SPEED,
-      birthTime: attack.startTime + (CELL_TELEGRAPH_BEATS * SEC_PER_BEAT),
-      life: CELL_PARTICLE_LIFE
-    });
+  // Glow the center tile and surrounding 8 tiles
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const glowCol = attack.col + dx;
+      const glowRow = attack.row + dy;
+
+      // Check bounds
+      if (glowCol >= 0 && glowCol < GRID_COLS && glowRow >= 0 && glowRow < GRID_ROWS) {
+        activeGlows.push({
+          col: glowCol,
+          row: glowRow,
+          birthTime: explosionTime
+        });
+      }
+    }
   }
 }
 
@@ -960,6 +992,75 @@ function updateParticles(now) {
     p.y += p.vy * dt;
 
     return true;
+  });
+}
+
+function updateGlows(now) {
+  activeGlows = activeGlows.filter(glow => {
+    const age = now - glow.birthTime;
+    return age < CELL_GLOW_FADE_TIME;
+  });
+}
+
+function renderGlows(now) {
+  activeGlows.forEach(glow => {
+    const age = now - glow.birthTime;
+    const fadeRatio = 1 - (age / CELL_GLOW_FADE_TIME);
+
+    if (fadeRatio > 0) {
+      const x = glow.col * GRID_CELL_WIDTH;
+      const y = glow.row * GRID_CELL_HEIGHT;
+      const opacity = 0.5 * fadeRatio;
+
+      gfx.fillStyle(CELL_GLOW_COLOR, opacity);
+      gfx.fillRect(x, y, GRID_CELL_WIDTH, GRID_CELL_HEIGHT);
+    }
+  });
+}
+
+// ============================================================================
+// RAY EXPLOSION SYSTEM
+// ============================================================================
+function spawnRayExplosion(attack, explosionTime) {
+  activeRayExplosions.push({
+    originX: attack.originX,
+    originY: attack.originY,
+    angle: attack.angle,
+    birthTime: explosionTime
+  });
+}
+
+function updateRayExplosions(now) {
+  activeRayExplosions = activeRayExplosions.filter(explosion => {
+    const age = now - explosion.birthTime;
+    return age < DIAGONAL_EXPLOSION_FADE_TIME;
+  });
+}
+
+function renderRayExplosions(now) {
+  activeRayExplosions.forEach(explosion => {
+    const age = now - explosion.birthTime;
+    const fadeRatio = 1 - (age / DIAGONAL_EXPLOSION_FADE_TIME);
+
+    if (fadeRatio > 0) {
+      const { x1, y1, x2, y2 } = calculateDiagonalLineExtentsFromData(
+        explosion.originX,
+        explosion.originY,
+        explosion.angle
+      );
+
+      // Calculate expanded glow width (300% of normal)
+      const baseGlowWidth = DIAGONAL_LINE_WIDTH * DIAGONAL_GLOW_MULTIPLIER;
+      const explosionWidth = baseGlowWidth * DIAGONAL_EXPLOSION_SIZE_MULTIPLIER;
+      const opacity = 0.3 * fadeRatio;
+
+      // Draw expanded explosion glow
+      gfx.lineStyle(explosionWidth, DIAGONAL_COLOR_LETHAL, opacity);
+      gfx.beginPath();
+      gfx.moveTo(x1, y1);
+      gfx.lineTo(x2, y2);
+      gfx.strokePath();
+    }
   });
 }
 
