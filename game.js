@@ -146,6 +146,8 @@ const SCORE_COLOR_ERROR = 0xff0000; // Red for off-beat
 let gfx;
 let cursors;
 let wasd;
+let textObjects = []; // Pool of Phaser text objects for UI
+let textPoolIndex = 0; // Current index in text pool
 let gameState = 'title';
 let beatStartTime = 0;
 let globalBeat = 0;
@@ -158,7 +160,7 @@ let lastBeatFlashTime = 0; // Last time grid flashed
 let lastInputTime = -999; // Last player input time
 let lastInputWasSynced = false; // Was last input on beat?
 let scoreFlashTime = 0; // Time when score should flash red
-let quarterNotesScore = 0; // Number of quarter notes (beats) survived
+let quarterNotesScore = 0; // Number of 1/32 notes survived (8 per beat)
 let audioCtx = null; // Web Audio context
 let currentBassStem = null; // Current bass pattern
 let currentBreakStem = null; // Current break pattern
@@ -168,6 +170,16 @@ let currentCycleBars = 0; // Current bar in the 24-bar cycle
 let currentPalette = PALETTE_NORMAL; // Active color palette
 let paletteTransitionProgress = 0; // 0-1 for TYPE2 -> NORMAL fade
 let lastPhase = 'normal'; // Track last phase to detect changes
+
+// ============================================================================
+// GLOBAL STATE - HIGH SCORES
+// ============================================================================
+const HIGH_SCORE_KEY = 'vibebeater_highscores';
+const MAX_HIGH_SCORES = 10;
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+let nameEntryChars = ['A', 'A', 'A']; // Current name being entered
+let nameEntryIndex = 0; // Which character (0-2) is being edited
+let charSelectIndex = 0; // Index in NAME_CHARS for current character
 
 // ============================================================================
 // GLOBAL STATE - PLAYER
@@ -189,6 +201,7 @@ let activeRayExplosions = []; // Ray explosion effects
 // VECTOR FONT DATA
 // ============================================================================
 const VECTOR_FONT = {
+  // Characters needed for "vibebeater"
   'v': [[0,0, 0.5,1, 1,0]],
   'i': [[0.5,0, 0.5,1]],
   'b': [[0,0, 0,1, 0.7,1, 0.7,0.5, 0,0.5, 0.7,0.5, 0.7,0, 0,0]],
@@ -196,24 +209,10 @@ const VECTOR_FONT = {
   'a': [[0,1, 0.5,0, 1,1], [0.25,0.5, 0.75,0.5]],
   't': [[0,0, 1,0], [0.5,0, 0.5,1]],
   'r': [[0,1, 0,0, 0.7,0, 0.7,0.5, 0,0.5], [0.7,0.5, 1,1]],
+  // Characters needed for "game over"
   'g': [[1,0.2, 0,0.2, 0,1, 1,1, 1,0.5, 0.5,0.5]],
   'm': [[0,1, 0,0, 0.5,0.5, 1,0, 1,1]],
   'o': [[0,0, 1,0, 1,1, 0,1, 0,0]],
-  'p': [[0,1, 0,0, 1,0, 1,0.5, 0,0.5]],
-  's': [[1,0.2, 0,0.2, 0,0.5, 1,0.5, 1,0.8, 0,0.8]],
-  'y': [[0,0, 0.5,0.5, 1,0], [0.5,0.5, 0.5,1]],
-  'k': [[0,1, 0,0], [1,0, 0.5,0.5, 1,1]],
-  'n': [[0,1, 0,0, 1,1, 1,0]],
-  '0': [[0,0, 1,0, 1,1, 0,1, 0,0]],
-  '1': [[0.3,0.2, 0.5,0, 0.5,1]],
-  '2': [[0,0, 1,0, 1,0.5, 0,1, 1,1]],
-  '3': [[0,0, 1,0, 1,1, 0,1], [1,0.5, 0.5,0.5]],
-  '4': [[0,0, 0,0.6, 1,0.6], [0.7,0, 0.7,1]],
-  '5': [[1,0, 0,0, 0,0.5, 1,0.5, 1,1, 0,1]],
-  '6': [[1,0, 0,0.5, 0,1, 1,1, 1,0.5, 0,0.5]],
-  '7': [[0,0, 1,0, 0.5,1]],
-  '8': [[0,0, 1,0, 1,0.5, 0,0.5, 0,0], [0,0.5, 1,0.5, 1,1, 0,1, 0,0.5]],
-  '9': [[1,1, 1,0, 0,0, 0,0.5, 1,0.5]],
   ' ': []
 };
 
@@ -225,7 +224,24 @@ function create() {
   gfx = scene.add.graphics();
   cursors = scene.input.keyboard.createCursorKeys();
   wasd = scene.input.keyboard.addKeys('W,S,A,D');
-  
+
+  // Create pool of text objects for UI rendering
+  textObjects = [];
+  for (let i = 0; i < 20; i++) {
+    const txt = scene.add.text(0, 0, '', {
+      fontFamily: '"Courier New", Courier, monospace',
+      fontSize: '24px',
+      fontStyle: 'bold',
+      color: '#00ffff',
+      stroke: '#000000',
+      strokeThickness: 2
+    });
+    txt.setOrigin(0.5, 0.5);
+    txt.setVisible(false);
+    textObjects.push(txt);
+  }
+  textPoolIndex = 0;
+
   stateChangeTime = scene.sound.context.currentTime;
 
   // Initialize audio context and select random stems
@@ -244,14 +260,24 @@ function create() {
   });
   
   scene.input.keyboard.on('keydown', (event) => {
+    const key = event.key.toUpperCase();
+
     if (gameState === 'title') {
-      startGame(scene);
+      if (key === ' ') {
+        startGame(scene);
+      }
+    } else if (gameState === 'name-entry') {
+      handleNameEntry(scene, key);
+    } else if (gameState === 'leaderboard') {
+      // Any key returns to title
+      gameState = 'title';
+      stateChangeTime = scene.sound.context.currentTime;
     } else if (gameState === 'gameover') {
       restartGame(scene);
     } else if (gameState === 'level') {
       // Check rhythm timing on any action key
       const actionKeysList = ['SPACE', 'Z', 'X', 'C', 'N', 'M', 'COMMA', 'H', 'J', 'K'];
-      if (actionKeysList.includes(event.key.toUpperCase())) {
+      if (actionKeysList.includes(key)) {
         handleRhythmInput(scene);
       }
     }
@@ -330,8 +356,17 @@ function restartGame(scene) {
 
 function triggerGameOver(scene) {
   stateChangeTime = scene.sound.context.currentTime;
-  gameState = 'gameover';
   stopAllMusic();
+
+  // Check if player achieved a high score
+  if (isHighScore(quarterNotesScore)) {
+    gameState = 'name-entry';
+    nameEntryChars = ['A', 'A', 'A'];
+    nameEntryIndex = 0;
+    charSelectIndex = 0;
+  } else {
+    gameState = 'leaderboard';
+  }
 }
 
 // ============================================================================
@@ -344,9 +379,9 @@ function updateBeatTracking(now) {
     lastBeatTime += SEC_PER_BEAT;
     globalBeat++;
 
-    // Increment score for each survived quarter note
+    // Increment score by 8 per quarter note (1/32 notes survived)
     if (gameState === 'level') {
-      quarterNotesScore++;
+      quarterNotesScore += 8;
     }
 
     // Flash grid on each beat
@@ -457,6 +492,72 @@ function updateColorPalette() {
   // Recalculate timing constants
   SEC_PER_BEAT = 60 / currentBPM;
   SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
+}
+
+// ============================================================================
+// HIGH SCORE SYSTEM
+// ============================================================================
+function getHighScores() {
+  try {
+    const stored = localStorage.getItem(HIGH_SCORE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveHighScores(scores) {
+  try {
+    localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores));
+  } catch (e) {
+    // Silently fail if localStorage unavailable
+  }
+}
+
+function isHighScore(score) {
+  const scores = getHighScores();
+  if (scores.length < MAX_HIGH_SCORES) return true;
+  return score > scores[scores.length - 1].score;
+}
+
+function addHighScore(name, score) {
+  const scores = getHighScores();
+  scores.push({ name, score });
+  scores.sort((a, b) => b.score - a.score);
+  const topScores = scores.slice(0, MAX_HIGH_SCORES);
+  saveHighScores(topScores);
+  return topScores;
+}
+
+function getTopScore() {
+  const scores = getHighScores();
+  return scores.length > 0 ? scores[0].score : 0;
+}
+
+function handleNameEntry(scene, key) {
+  if (key === 'ARROWUP' || key === 'W') {
+    // Cycle character backward
+    charSelectIndex = (charSelectIndex - 1 + NAME_CHARS.length) % NAME_CHARS.length;
+    nameEntryChars[nameEntryIndex] = NAME_CHARS[charSelectIndex];
+  } else if (key === 'ARROWDOWN' || key === 'S') {
+    // Cycle character forward
+    charSelectIndex = (charSelectIndex + 1) % NAME_CHARS.length;
+    nameEntryChars[nameEntryIndex] = NAME_CHARS[charSelectIndex];
+  } else if (key === ' ') {
+    // Confirm character and move to next
+    nameEntryIndex++;
+    if (nameEntryIndex >= 3) {
+      // Name complete - save and show leaderboard
+      const name = nameEntryChars.join('');
+      addHighScore(name, quarterNotesScore);
+      gameState = 'leaderboard';
+      stateChangeTime = scene.sound.context.currentTime;
+    } else {
+      // Move to next character, reset to 'A'
+      charSelectIndex = 0;
+      nameEntryChars[nameEntryIndex] = 'A';
+    }
+  }
 }
 
 function lerpColor(color1, color2, t) {
@@ -836,6 +937,7 @@ function checkPivotingRayCollision(attack) {
 // ============================================================================
 function render(scene, now) {
   gfx.clear();
+  resetTextPool(); // Reset text pool at start of each frame
 
   // Draw background with current phase color
   if (gameState === 'level') {
@@ -850,6 +952,18 @@ function render(scene, now) {
   if (gameState === 'title') {
     renderGrid();
     renderTitleScreen(scene, now);
+    return;
+  }
+
+  if (gameState === 'name-entry') {
+    renderGrid();
+    renderNameEntry(scene, now);
+    return;
+  }
+
+  if (gameState === 'leaderboard') {
+    renderGrid();
+    renderLeaderboard(scene, now);
     return;
   }
 
@@ -871,25 +985,94 @@ function render(scene, now) {
 // ============================================================================
 function renderTitleScreen(scene, now) {
   const fadeAlpha = Math.min(1, (now - stateChangeTime) / (FADE_DURATION_BEATS * SEC_PER_BEAT));
-  
+
   gfx.fillStyle(0x000000, TITLE_BG_OPACITY * fadeAlpha);
   gfx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  
-  drawCenteredVectorText(GAME_NAME, TEXT_CHAR_WIDTH, TEXT_CHAR_HEIGHT, 0, fadeAlpha);
+
+  // Title (vector font - keep for identity)
+  drawCenteredVectorText(GAME_NAME, TEXT_CHAR_WIDTH, TEXT_CHAR_HEIGHT, -60, fadeAlpha);
+
+  // Instructions (system font)
+  drawSystemText("PRESS SPACE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 60, 32, fadeAlpha * 0.8);
+
+  // High score (system font)
+  const topScore = getTopScore();
+  if (topScore > 0) {
+    const scoreText = `HIGH SCORE: ${topScore}`;
+    drawSystemText(scoreText, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 140, 24, fadeAlpha * 0.6);
+  }
 }
 
 function renderGameOverScreen(scene, now) {
   const fadeAlpha = Math.min(1, (now - stateChangeTime) / (FADE_DURATION_BEATS * SEC_PER_BEAT));
-  
+
   gfx.fillStyle(0x000000, 0.75 * fadeAlpha);
   gfx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-  
+
   const titleText = "game over";
   const maxWidth = SCREEN_WIDTH * 0.8;
   const charWidth = maxWidth / (titleText.length * TEXT_CHAR_SPACING);
   const charHeight = charWidth * (TEXT_CHAR_HEIGHT / TEXT_CHAR_WIDTH);
-  
+
   drawCenteredVectorText(titleText, charWidth, charHeight, -charHeight, fadeAlpha);
+}
+
+function renderNameEntry(scene, now) {
+  const fadeAlpha = Math.min(1, (now - stateChangeTime) / (FADE_DURATION_BEATS * SEC_PER_BEAT));
+
+  gfx.fillStyle(0x000000, 0.85 * fadeAlpha);
+  gfx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  // Title (system font)
+  drawSystemText("NEW HIGH SCORE!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 180, 36, fadeAlpha);
+
+  // Score (system font)
+  const scoreText = `SCORE: ${quarterNotesScore}`;
+  drawSystemText(scoreText, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 80, 28, fadeAlpha);
+
+  // Name being entered (system font)
+  let displayName = '';
+  for (let i = 0; i < 3; i++) {
+    if (i < nameEntryIndex) {
+      displayName += nameEntryChars[i];
+    } else if (i === nameEntryIndex) {
+      displayName += nameEntryChars[i] + '_';
+    } else {
+      displayName += '_';
+    }
+  }
+  drawSystemText(displayName, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 48, fadeAlpha);
+
+  // Instructions (system font)
+  drawSystemText("PRESS SPACE", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 120, 24, fadeAlpha * 0.7);
+}
+
+function renderLeaderboard(scene, now) {
+  const fadeAlpha = Math.min(1, (now - stateChangeTime) / (FADE_DURATION_BEATS * SEC_PER_BEAT));
+
+  gfx.fillStyle(0x000000, 0.85 * fadeAlpha);
+  gfx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  // Title (system font)
+  drawSystemText("HIGH SCORES", SCREEN_WIDTH / 2, 80, 36, fadeAlpha);
+
+  // Get high scores
+  const scores = getHighScores();
+  const startY = 160;
+  const lineHeight = 38;
+
+  if (scores.length === 0) {
+    drawSystemText("NO SCORES YET", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 24, fadeAlpha * 0.7);
+  } else {
+    for (let i = 0; i < Math.min(10, scores.length); i++) {
+      const y = startY + (i * lineHeight);
+      const line = `${i + 1}.  ${scores[i].name}  ${scores[i].score}`;
+      drawSystemText(line, SCREEN_WIDTH / 2, y, 22, fadeAlpha);
+    }
+  }
+
+  // Footer (system font)
+  drawSystemText("PRESS ANY KEY", SCREEN_WIDTH / 2, SCREEN_HEIGHT - 60, 20, fadeAlpha * 0.6);
 }
 
 // ========================================================================
@@ -969,10 +1152,10 @@ function renderScore() {
   const timeSinceScoreFlash = now - scoreFlashTime;
   const isFlashing = timeSinceScoreFlash < SCORE_FLASH_DURATION;
 
-  const scoreColor = isFlashing ? SCORE_COLOR_ERROR : TEXT_COLOR;
+  const scoreColor = isFlashing ? '#ff0000' : '#00ffff';
   const scoreText = `${quarterNotesScore}`;
 
-  drawVectorText(scoreText, 25, 25, 20, 30, 1.0, scoreColor);
+  drawSystemText(scoreText, 60, 30, 28, 1.0, scoreColor, false);
 }
 
 // ============================================================================
@@ -1171,6 +1354,30 @@ function drawVectorText(text, startX, startY, charWidth, charHeight, alpha = 1.0
     });
     currentX += charWidth * TEXT_CHAR_SPACING;
   }
+}
+
+// ============================================================================
+// RENDERING - TEXT (SYSTEM FONT)
+// ============================================================================
+function resetTextPool() {
+  textObjects.forEach(txt => txt.setVisible(false));
+  textPoolIndex = 0;
+}
+
+function drawSystemText(text, x, y, size, alpha = 1.0, color = '#00ffff', centered = true) {
+  if (textPoolIndex >= textObjects.length) return; // Pool exhausted
+  const txt = textObjects[textPoolIndex++];
+  txt.setText(text);
+  txt.setFontSize(size);
+  txt.setColor(color);
+  txt.setAlpha(alpha);
+  txt.setPosition(x, y);
+  if (centered) {
+    txt.setOrigin(0.5, 0.5);
+  } else {
+    txt.setOrigin(0, 0.5);
+  }
+  txt.setVisible(true);
 }
 
 // ============================================================================
