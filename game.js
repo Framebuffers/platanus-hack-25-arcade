@@ -5,7 +5,7 @@ const config = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
-  backgroundColor: '#000000',
+  backgroundColor: '#0d0d0d',
   scene: { create, update }
 };
 
@@ -21,12 +21,16 @@ const GAME_NAME = 'vibebeater';
 // ============================================================================
 // GLOBAL CONSTANTS - TIMING
 // ============================================================================
-const BPM = 120;
-const SEC_PER_BEAT = 60 / BPM;
+const BPM_NORMAL = 120;
+const BPM_STRESS = 190;
 const BEATS_PER_BAR = 4;
-const SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
 const SYNC_WINDOW_BEATS = 0.125; // ±1/32 note tolerance for "on beat"
 const MEASURES_PER_PROGRESSION = 4; // Progress every 4 measures
+
+// Dynamic timing (calculated per frame based on current BPM)
+let currentBPM = BPM_NORMAL;
+let SEC_PER_BEAT = 60 / currentBPM;
+let SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
 
 // ============================================================================
 // GLOBAL CONSTANTS - MUSIC
@@ -49,10 +53,22 @@ const GRID_LINE_WIDTH = 1;
 const GRID_CELL_WIDTH = SCREEN_WIDTH / GRID_COLS;
 const GRID_CELL_HEIGHT = SCREEN_HEIGHT / GRID_ROWS;
 
-// Grid colors (gradient)
-const GRID_TOP_COLOR = { r: 0x1E, g: 0xD9, b: 0xC6 };
-const GRID_BOT_COLOR = { r: 0xBF, g: 0x04, b: 0x8D };
-const GRID_GRADIENT_SEGMENTS = 20;
+// Color palettes (hex colors)
+const PALETTE_NORMAL = [0xF2F2F2, 0x90C7F2, 0x01B2CB, 0xB080F2, 0xB527F2, 0xBD21BF];
+const PALETTE_TYPE_2 = [0x18F0C8, 0x17A389, 0xF0BC0C, 0xE800F0, 0x9E10A3];
+const PALETTE_STRESS = [0xFF0B00, 0xBF0800, 0x800600, 0xE60A00, 0x400300];
+
+// Background colors for each phase
+const BG_NORMAL = 0x0d0d0d;
+const BG_STRESS = 0x1a0000; // Dark red tint
+const BG_TYPE_2 = 0x0f0f0f; // Lighter gray
+let currentBgColor = BG_NORMAL;
+
+// Cycle timing (in bars)
+const CYCLE_NORMAL_BARS = 6;
+const CYCLE_STRESS_BARS = 4;
+const CYCLE_TYPE2_BARS = 2;
+const CYCLE_TOTAL_BARS = CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS + CYCLE_TYPE2_BARS; // 12 bars
 
 // Grid flash feedback
 const GRID_FLASH_DURATION = 0.1; // Flash duration in seconds
@@ -77,15 +93,24 @@ const SHIP_COLOR_P1 = 0x00FF00;
 // GLOBAL CONSTANTS - DIAGONAL LINE ATTACK
 // ============================================================================
 const DIAGONAL_FADE_IN_BEATS = 0.25; // Quarter note fade in
-const DIAGONAL_CHARGE_BEATS = 4; // Full bar lethal duration
+const DIAGONAL_CHARGE_BEATS = 3.75; // Just under 1 bar - gives 4 beats total to escape
 const DIAGONAL_COLOR_CHANGE_THRESHOLD = 0.75; // 75% opacity
 const DIAGONAL_LINE_WIDTH = 2;
 const DIAGONAL_COLOR_CHARGING = 0xFFFFFF;
 const DIAGONAL_COLOR_LETHAL = 0xFF0000;
 const DIAGONAL_GLOW_MULTIPLIER = 5;
-const DIAGONAL_ATTACK_INTERVAL_BEATS = 8; // Spawn every 2 bars
+const DIAGONAL_ATTACK_INTERVAL_BEATS = 4; // Spawn every bar (2x faster)
 const DIAGONAL_EXPLOSION_FADE_TIME = 1.0; // Ray explosion fade duration in seconds
 const DIAGONAL_EXPLOSION_SIZE_MULTIPLIER = 3.0; // 300% size for explosion
+
+// Pivoting ray pattern
+const PIVOT_ORIGIN_OFFSET_TILES = 2; // Tiles away from player
+const PIVOT_ROTATION_SPEED = Math.PI / 2; // Radians per second (90 deg/sec)
+const PIVOT_RAY_COUNT = 3; // Number of rays in pivoting pattern
+const PIVOT_ROTATION_BEATS = 2; // Beats to rotate before locking
+const PIVOT_LOCKIN_BEATS = 2; // Beats to wait after locking before becoming lethal
+const PIVOT_CHARGE_BEATS = 1; // Beats in lethal phase
+const PIVOT_SPAWN_CHANCE = 0.15; // 15% chance to spawn pivoting attack instead of normal ray
 
 // ============================================================================
 // GLOBAL CONSTANTS - GRID CELL ATTACK
@@ -95,7 +120,7 @@ const CELL_ACTIVE_BEATS = 0.1; // Lethal phase duration (instant)
 const CELL_TELEGRAPH_COLOR = 0xFFFF00; // Yellow warning
 const CELL_ACTIVE_COLOR = 0xFF0000; // Red lethal
 const CELL_GLOW_COLOR = 0xFF6600; // Orange glow
-const CELL_ATTACK_INTERVAL_BEATS = 12; // Spawn every 1.5 bars
+const CELL_ATTACK_INTERVAL_BEATS = 6; // Spawn every 1.5 bars (2x faster)
 const CELL_GLOW_FADE_TIME = 1.0; // Glow fade duration in seconds
 
 // ============================================================================
@@ -133,11 +158,16 @@ let lastBeatFlashTime = 0; // Last time grid flashed
 let lastInputTime = -999; // Last player input time
 let lastInputWasSynced = false; // Was last input on beat?
 let scoreFlashTime = 0; // Time when score should flash red
+let quarterNotesScore = 0; // Number of quarter notes (beats) survived
 let audioCtx = null; // Web Audio context
 let currentBassStem = null; // Current bass pattern
 let currentBreakStem = null; // Current break pattern
 let musicStartTime = 0; // When music started
 let scheduledNodes = []; // Track all scheduled audio nodes for cleanup
+let currentCycleBars = 0; // Current bar in the 24-bar cycle
+let currentPalette = PALETTE_NORMAL; // Active color palette
+let paletteTransitionProgress = 0; // 0-1 for TYPE2 -> NORMAL fade
+let lastPhase = 'normal'; // Track last phase to detect changes
 
 // ============================================================================
 // GLOBAL STATE - PLAYER
@@ -265,13 +295,24 @@ function startGame(scene) {
   beatStartTime = now;
   lastBeatTime = now;
   globalBeat = 0;
-  
+
   shipPos = { x: SHIP_START_X, y: SHIP_START_Y };
   shipVel = { x: 0, y: 0 };
   activeAttacks = [];
   activeParticles = [];
   activeGlows = [];
   activeRayExplosions = [];
+
+  // Reset color cycle and BPM
+  currentCycleBars = 0;
+  currentPalette = PALETTE_NORMAL;
+  paletteTransitionProgress = 0;
+  currentBPM = BPM_NORMAL;
+  currentBgColor = BG_NORMAL;
+  lastPhase = 'normal'; // Reset phase tracking
+  SEC_PER_BEAT = 60 / currentBPM;
+  SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
+  quarterNotesScore = 0; // Reset score
 
   nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
   nextCellAttackTime = now + (CELL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
@@ -298,14 +339,19 @@ function triggerGameOver(scene) {
 // ============================================================================
 function updateBeatTracking(now) {
   const oldBeat = globalBeat;
-  
+
   while (now > lastBeatTime + SEC_PER_BEAT) {
     lastBeatTime += SEC_PER_BEAT;
     globalBeat++;
-    
+
+    // Increment score for each survived quarter note
+    if (gameState === 'level') {
+      quarterNotesScore++;
+    }
+
     // Flash grid on each beat
     lastBeatFlashTime = now;
-    
+
     // Check measure boundaries (every 4 beats)
     if (globalBeat % BEATS_PER_BAR === 0) {
       onMeasureComplete(now);
@@ -336,16 +382,6 @@ function handleRhythmInput(scene) {
   }
 }
 
-function onMeasureComplete(now) {
-  measureCount++;
-  
-  if (measureCount >= MEASURES_PER_PROGRESSION) {
-    measureCount = 0;
-    // Progress through circle of fifths
-    currentKeyIndex = (currentKeyIndex + 1) % CIRCLE_OF_FIFTHS.length;
-  }
-}
-
 // ============================================================================
 // MUSIC SYSTEM - RHYTHM INPUT
 // ============================================================================
@@ -371,12 +407,84 @@ function handleRhythmInput(scene) {
 
 function onMeasureComplete(now) {
   measureCount++;
-  
-  if (measureCount >= MEASURES_PER_PROGRESSION) {
-    measureCount = 0;
-    // Progress through circle of fifths
-    currentKeyIndex = (currentKeyIndex + 1) % CIRCLE_OF_FIFTHS.length;
+
+  // Update color cycle (every bar)
+  if (gameState === 'level') {
+    currentCycleBars = (currentCycleBars + 1) % CYCLE_TOTAL_BARS;
+    updateColorPalette();
   }
+}
+
+// ============================================================================
+// COLOR CYCLING SYSTEM
+// ============================================================================
+function updateColorPalette() {
+  let currentPhase = 'normal';
+
+  if (currentCycleBars < CYCLE_NORMAL_BARS) {
+    // Normal phase (0-5 bars)
+    currentPalette = PALETTE_NORMAL;
+    paletteTransitionProgress = 0;
+    currentBPM = BPM_NORMAL;
+    currentBgColor = BG_NORMAL;
+    currentPhase = 'normal';
+  } else if (currentCycleBars < CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS) {
+    // Stress phase (6-9 bars) - 1.25x spawn rate, increase BPM, red background
+    currentPalette = PALETTE_STRESS;
+    paletteTransitionProgress = 0;
+    currentBPM = BPM_STRESS;
+    currentBgColor = BG_STRESS;
+    currentPhase = 'stress';
+  } else {
+    // Type 2 phase (10-11 bars) - Fade BPM back to normal, transition colors
+    const type2Progress = (currentCycleBars - CYCLE_NORMAL_BARS - CYCLE_STRESS_BARS) / CYCLE_TYPE2_BARS;
+    paletteTransitionProgress = type2Progress;
+
+    // Interpolate BPM from stress to normal
+    currentBPM = BPM_STRESS + (BPM_NORMAL - BPM_STRESS) * type2Progress;
+
+    // Interpolate background: TYPE_2 gray -> normal black
+    currentBgColor = lerpColor(BG_TYPE_2, BG_NORMAL, type2Progress);
+    currentPhase = 'type2';
+  }
+
+  // Change music key when phase changes
+  if (currentPhase !== lastPhase) {
+    currentKeyIndex = (currentKeyIndex + 1) % CIRCLE_OF_FIFTHS.length;
+    lastPhase = currentPhase;
+  }
+
+  // Recalculate timing constants
+  SEC_PER_BEAT = 60 / currentBPM;
+  SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
+}
+
+function lerpColor(color1, color2, t) {
+  const r1 = (color1 >> 16) & 0xFF;
+  const g1 = (color1 >> 8) & 0xFF;
+  const b1 = color1 & 0xFF;
+
+  const r2 = (color2 >> 16) & 0xFF;
+  const g2 = (color2 >> 8) & 0xFF;
+  const b2 = color2 & 0xFF;
+
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+
+  return (r << 16) | (g << 8) | b;
+}
+
+function getCurrentGridColor(index) {
+  // During TYPE2 phase, interpolate between TYPE2 and NORMAL
+  if (currentCycleBars >= CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS) {
+    const type2Color = PALETTE_TYPE_2[index % PALETTE_TYPE_2.length];
+    const normalColor = PALETTE_NORMAL[index % PALETTE_NORMAL.length];
+    return lerpColor(type2Color, normalColor, paletteTransitionProgress);
+  }
+
+  // Otherwise use current palette directly
+  return currentPalette[index % currentPalette.length];
 }
 
 // ============================================================================
@@ -416,21 +524,35 @@ function getCurrentMaxSpeed(scene) {
 // ATTACK SYSTEM - MANAGEMENT
 // ============================================================================
 function updateAttacks(scene, now) {
-  // Spawn diagonal line attacks
-  if (now >= nextAttackTime && gameState === 'level') {
-    spawnDiagonalLineAttack(now);
-    nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
+  // Calculate spawn rate multiplier (1.25x faster during stress phase)
+  const isStressPhase = currentCycleBars >= CYCLE_NORMAL_BARS && currentCycleBars < CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS;
+  const spawnMultiplier = isStressPhase ? 0.8 : 1.0; // 0.8 interval = 1.25x rate (25% faster)
+
+  // Check if any pivoting ray attacks are currently active
+  const hasPivotingRays = activeAttacks.some(attack => attack.type === 'PivotingRay');
+
+  // Spawn diagonal line attacks (disabled if pivoting rays are active)
+  if (now >= nextAttackTime && gameState === 'level' && !hasPivotingRays) {
+    // Randomly choose between single ray and pivoting pattern based on spawn chance
+    if (Math.random() < PIVOT_SPAWN_CHANCE) {
+      spawnPivotingRayPattern(now);
+    } else {
+      spawnDiagonalLineAttack(now);
+    }
+    nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT * spawnMultiplier);
   }
 
-  // Spawn cell attacks
-  if (now >= nextCellAttackTime && gameState === 'level') {
+  // Spawn cell attacks (disabled if pivoting rays are active)
+  if (now >= nextCellAttackTime && gameState === 'level' && !hasPivotingRays) {
     spawnCellAttack(now);
-    nextCellAttackTime = now + (CELL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT);
+    nextCellAttackTime = now + (CELL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT * spawnMultiplier);
   }
 
   activeAttacks = activeAttacks.filter(attack => {
     if (attack.type === 'DiagonalLine') {
       return updateDiagonalLineAttack(attack, scene, now);
+    } else if (attack.type === 'PivotingRay') {
+      return updatePivotingRay(attack, scene, now);
     } else if (attack.type === 'GridCell') {
       return updateGridCellAttack(attack, scene, now);
     }
@@ -502,50 +624,33 @@ function updateGridCellAttack(attack, scene, now) {
 // ATTACK SYSTEM - DIAGONAL LINE ATTACK
 // ============================================================================
 function spawnDiagonalLineAttack(startTime) {
-  const SAFE_ZONE_RADIUS = 80; // Don't spawn lines too close to player
-  let attempts = 0;
-  let validLine = false;
-  let originX, originY, angle;
+  // Pick a random edge of the screen to spawn from
+  const edge = Phaser.Math.Between(0, 3); // 0=top, 1=right, 2=bottom, 3=left
+  let originX, originY;
 
-  // Try to find a line that doesn't pass through player's current position
-  while (!validLine && attempts < 10) {
-    const originCol = Phaser.Math.Between(0, GRID_COLS);
-    const originRow = Phaser.Math.Between(0, GRID_ROWS);
-
-    originX = originCol * GRID_CELL_WIDTH;
-    originY = originRow * GRID_CELL_HEIGHT;
-
-    const endCol = GRID_COLS - originCol;
-    const endRow = GRID_ROWS - originRow;
-
-    const endX = endCol * GRID_CELL_WIDTH;
-    const endY = endRow * GRID_CELL_HEIGHT;
-
-    const dx = endX - originX;
-    const dy = endY - originY;
-    angle = Math.atan2(dy, dx);
-
-    // Calculate distance from player to line
-    const lineLength = Math.sqrt(dx * dx + dy * dy);
-    if (lineLength === 0) {
-      attempts++;
-      continue;
-    }
-
-    const t = Math.max(0, Math.min(1,
-      ((shipPos.x - originX) * dx + (shipPos.y - originY) * dy) / (lineLength * lineLength)
-    ));
-
-    const projX = originX + t * dx;
-    const projY = originY + t * dy;
-    const distToPlayer = Math.sqrt((shipPos.x - projX) ** 2 + (shipPos.y - projY) ** 2);
-
-    if (distToPlayer > SAFE_ZONE_RADIUS) {
-      validLine = true;
-    }
-
-    attempts++;
+  switch(edge) {
+    case 0: // Top edge
+      originX = Phaser.Math.Between(0, SCREEN_WIDTH);
+      originY = 0;
+      break;
+    case 1: // Right edge
+      originX = SCREEN_WIDTH;
+      originY = Phaser.Math.Between(0, SCREEN_HEIGHT);
+      break;
+    case 2: // Bottom edge
+      originX = Phaser.Math.Between(0, SCREEN_WIDTH);
+      originY = SCREEN_HEIGHT;
+      break;
+    case 3: // Left edge
+      originX = 0;
+      originY = Phaser.Math.Between(0, SCREEN_HEIGHT);
+      break;
   }
+
+  // Calculate angle to point directly at player
+  const dx = shipPos.x - originX;
+  const dy = shipPos.y - originY;
+  const angle = Math.atan2(dy, dx);
 
   activeAttacks.push({
     type: 'DiagonalLine',
@@ -604,17 +709,150 @@ function calculateDiagonalLineExtentsFromData(originX, originY, angle) {
 }
 
 // ============================================================================
+// ATTACK SYSTEM - PIVOTING RAY PATTERN
+// ============================================================================
+function spawnPivotingRayPattern(startTime) {
+  // Calculate origin point 2 tiles away from player
+  const offsetDist = PIVOT_ORIGIN_OFFSET_TILES * GRID_CELL_WIDTH;
+  const randomAngle = Phaser.Math.Between(0, 360) * (Math.PI / 180);
+
+  const originX = shipPos.x + Math.cos(randomAngle) * offsetDist;
+  const originY = shipPos.y + Math.sin(randomAngle) * offsetDist;
+
+  // Calculate initial angle pointing at player
+  const dx = shipPos.x - originX;
+  const dy = shipPos.y - originY;
+  const initialAngle = Math.atan2(dy, dx);
+
+  // Spawn multiple rays in a pattern
+  for (let i = 0; i < PIVOT_RAY_COUNT; i++) {
+    const angleOffset = (i * (Math.PI * 2)) / PIVOT_RAY_COUNT;
+    activeAttacks.push({
+      type: 'PivotingRay',
+      startTime: startTime,
+      originX: originX,
+      originY: originY,
+      initialAngle: initialAngle + angleOffset,
+      currentAngle: initialAngle + angleOffset,
+      hit: false
+    });
+  }
+}
+
+function updatePivotingRay(attack, scene, now) {
+  const elapsed = now - attack.startTime;
+
+  // Phase timings
+  const fadeInTime = DIAGONAL_FADE_IN_BEATS * SEC_PER_BEAT;
+  const rotationTime = PIVOT_ROTATION_BEATS * SEC_PER_BEAT;
+  const lockinTime = PIVOT_LOCKIN_BEATS * SEC_PER_BEAT;
+  const chargeTime = PIVOT_CHARGE_BEATS * SEC_PER_BEAT;
+
+  const rotationEndTime = fadeInTime + rotationTime;
+  const lockinEndTime = rotationEndTime + lockinTime;
+  const totalDuration = lockinEndTime + chargeTime;
+
+  if (elapsed >= totalDuration) {
+    if (!attack.exploded) {
+      spawnRayExplosion(attack, now);
+      attack.exploded = true;
+    }
+    return false;
+  }
+
+  // Phase 1: Fade in - no rotation yet
+  if (elapsed < fadeInTime) {
+    // Keep initial angle during fade in
+  }
+  // Phase 2: Rotation - actively pivot the ray
+  else if (elapsed < rotationEndTime) {
+    const rotationElapsed = elapsed - fadeInTime;
+    attack.currentAngle = attack.initialAngle + (PIVOT_ROTATION_SPEED * rotationElapsed);
+  }
+  // Phase 3: Lock-in - stop rotating, wait before becoming lethal
+  else if (elapsed < lockinEndTime) {
+    // Keep the angle from end of rotation phase (already set)
+  }
+  // Phase 4: Charge - lethal phase, ray turns red
+  else {
+    // Angle stays locked from rotation phase
+  }
+
+  // Calculate opacity based on phase
+  let opacity = 0;
+  if (elapsed < fadeInTime) {
+    // Fade in
+    opacity = elapsed / fadeInTime;
+  } else if (elapsed < rotationEndTime) {
+    // Rotation phase - stay at medium opacity (white)
+    opacity = 0.6;
+  } else if (elapsed < lockinEndTime) {
+    // Lock-in phase - pulse to indicate impending danger
+    const lockinProgress = (elapsed - rotationEndTime) / lockinTime;
+    opacity = 0.6 + 0.2 * Math.sin(lockinProgress * Math.PI * 8); // Rapid pulse
+  } else {
+    // Charge phase - ramp up to full red
+    const chargeProgress = (elapsed - lockinEndTime) / chargeTime;
+    opacity = 0.6 + 0.4 * chargeProgress; // Ramp from 0.6 to 1.0
+  }
+
+  // Only check collision during charge phase (when red)
+  if (!attack.hit && elapsed >= lockinEndTime) {
+    if (checkPivotingRayCollision(attack)) {
+      attack.hit = true;
+      triggerGameOver(scene);
+    }
+  }
+
+  return true;
+}
+
+function checkPivotingRayCollision(attack) {
+  const { x1, y1, x2, y2 } = calculateDiagonalLineExtentsFromData(
+    attack.originX,
+    attack.originY,
+    attack.currentAngle
+  );
+
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSq = dx * dx + dy * dy;
+
+  if (lengthSq === 0) return false;
+
+  const t = Math.max(0, Math.min(1,
+    ((shipPos.x - x1) * dx + (shipPos.y - y1) * dy) / lengthSq
+  ));
+
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
+
+  const dist = Math.sqrt((shipPos.x - projX) ** 2 + (shipPos.y - projY) ** 2);
+  return dist <= SHIP_COLLISION_RADIUS;
+}
+
+// ============================================================================
 // RENDERING - MAIN
 // ============================================================================
 function render(scene, now) {
   gfx.clear();
-  
+
+  // Draw background with current phase color
+  if (gameState === 'level') {
+    const r = (currentBgColor >> 16) & 0xFF;
+    const g = (currentBgColor >> 8) & 0xFF;
+    const b = currentBgColor & 0xFF;
+    const bgColorWithAlpha = (r << 16) | (g << 8) | b;
+    gfx.fillStyle(bgColorWithAlpha, 1);
+    gfx.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+  }
+
   if (gameState === 'title') {
     renderGrid();
     renderTitleScreen(scene, now);
     return;
   }
-  
+
   renderGrid();
   renderAttacks(scene, now);
   renderGlows(now);
@@ -622,7 +860,7 @@ function render(scene, now) {
   renderParticles(now);
   renderShip();
   renderScore();
-  
+
   if (gameState === 'gameover') {
     renderGameOverScreen(scene, now);
   }
@@ -660,55 +898,49 @@ function renderGameOverScreen(scene, now) {
 function renderGrid() {
   const now = gameState === 'level' ? gfx.scene.sound.context.currentTime : 0;
   const timeSinceFlash = now - lastBeatFlashTime;
-  const flashIntensity = timeSinceFlash < GRID_FLASH_DURATION 
-    ? (1 - timeSinceFlash / GRID_FLASH_DURATION) * GRID_FLASH_INTENSITY 
+  const flashIntensity = timeSinceFlash < GRID_FLASH_DURATION
+    ? (1 - timeSinceFlash / GRID_FLASH_DURATION) * GRID_FLASH_INTENSITY
     : 0;
-  
-  // Vertical lines with gradient
+
+  // Vertical lines - cycle through palette colors
   for (let i = 0; i <= GRID_COLS; i++) {
     const x = i * GRID_CELL_WIDTH;
-    
-    for (let s = 0; s < GRID_GRADIENT_SEGMENTS; s++) {
-      const y1 = (s / GRID_GRADIENT_SEGMENTS) * SCREEN_HEIGHT;
-      const y2 = ((s + 1) / GRID_GRADIENT_SEGMENTS) * SCREEN_HEIGHT;
-      const midY = (y1 + y2) / 2;
-      const ratio = midY / SCREEN_HEIGHT;
-      
-      let r = Math.floor(GRID_TOP_COLOR.r * (1 - ratio) + GRID_BOT_COLOR.r * ratio);
-      let g = Math.floor(GRID_TOP_COLOR.g * (1 - ratio) + GRID_BOT_COLOR.g * ratio);
-      let b = Math.floor(GRID_TOP_COLOR.b * (1 - ratio) + GRID_BOT_COLOR.b * ratio);
-      
-      // Apply flash intensity
-      r = Math.min(255, Math.floor(r + 255 * flashIntensity));
-      g = Math.min(255, Math.floor(g + 255 * flashIntensity));
-      b = Math.min(255, Math.floor(b + 255 * flashIntensity));
-      
-      const color = (r << 16) | (g << 8) | b;
-      
-      gfx.lineStyle(GRID_LINE_WIDTH, color, 1);
-      gfx.beginPath();
-      gfx.moveTo(x, y1);
-      gfx.lineTo(x, y2);
-      gfx.strokePath();
-    }
-  }
-  
-  // Horizontal lines with gradient
-  for (let i = 0; i <= GRID_ROWS; i++) {
-    const y = i * GRID_CELL_HEIGHT;
-    const ratio = y / SCREEN_HEIGHT;
-    
-    let r = Math.floor(GRID_TOP_COLOR.r * (1 - ratio) + GRID_BOT_COLOR.r * ratio);
-    let g = Math.floor(GRID_TOP_COLOR.g * (1 - ratio) + GRID_BOT_COLOR.g * ratio);
-    let b = Math.floor(GRID_TOP_COLOR.b * (1 - ratio) + GRID_BOT_COLOR.b * ratio);
-    
+    let baseColor = getCurrentGridColor(i);
+
+    let r = (baseColor >> 16) & 0xFF;
+    let g = (baseColor >> 8) & 0xFF;
+    let b = baseColor & 0xFF;
+
     // Apply flash intensity
     r = Math.min(255, Math.floor(r + 255 * flashIntensity));
     g = Math.min(255, Math.floor(g + 255 * flashIntensity));
     b = Math.min(255, Math.floor(b + 255 * flashIntensity));
-    
+
     const color = (r << 16) | (g << 8) | b;
-    
+
+    gfx.lineStyle(GRID_LINE_WIDTH, color, 1);
+    gfx.beginPath();
+    gfx.moveTo(x, 0);
+    gfx.lineTo(x, SCREEN_HEIGHT);
+    gfx.strokePath();
+  }
+
+  // Horizontal lines - cycle through palette colors
+  for (let i = 0; i <= GRID_ROWS; i++) {
+    const y = i * GRID_CELL_HEIGHT;
+    let baseColor = getCurrentGridColor(i);
+
+    let r = (baseColor >> 16) & 0xFF;
+    let g = (baseColor >> 8) & 0xFF;
+    let b = baseColor & 0xFF;
+
+    // Apply flash intensity
+    r = Math.min(255, Math.floor(r + 255 * flashIntensity));
+    g = Math.min(255, Math.floor(g + 255 * flashIntensity));
+    b = Math.min(255, Math.floor(b + 255 * flashIntensity));
+
+    const color = (r << 16) | (g << 8) | b;
+
     gfx.lineStyle(GRID_LINE_WIDTH, color, 1);
     gfx.beginPath();
     gfx.moveTo(0, y);
@@ -732,14 +964,14 @@ function renderShip() {
 
 function renderScore() {
   if (gameState !== 'level') return;
-  
+
   const now = gfx.scene.sound.context.currentTime;
   const timeSinceScoreFlash = now - scoreFlashTime;
   const isFlashing = timeSinceScoreFlash < SCORE_FLASH_DURATION;
-  
+
   const scoreColor = isFlashing ? SCORE_COLOR_ERROR : TEXT_COLOR;
-  const scoreText = `key ${currentKeyIndex}`;
-  
+  const scoreText = `${quarterNotesScore}`;
+
   drawVectorText(scoreText, 25, 25, 20, 30, 1.0, scoreColor);
 }
 
@@ -750,6 +982,8 @@ function renderAttacks(scene, now) {
   activeAttacks.forEach(attack => {
     if (attack.type === 'DiagonalLine') {
       renderDiagonalLine(attack, now);
+    } else if (attack.type === 'PivotingRay') {
+      renderPivotingRay(attack, now);
     } else if (attack.type === 'GridCell') {
       renderGridCell(attack, now);
     }
@@ -789,6 +1023,66 @@ function renderDiagonalLine(attack, now) {
   gfx.lineTo(x2, y2);
   gfx.strokePath();
   
+  // Core
+  gfx.lineStyle(DIAGONAL_LINE_WIDTH, lineColor, opacity);
+  gfx.beginPath();
+  gfx.moveTo(x1, y1);
+  gfx.lineTo(x2, y2);
+  gfx.strokePath();
+}
+
+function renderPivotingRay(attack, now) {
+  const elapsed = now - attack.startTime;
+
+  // Phase timings (must match updatePivotingRay)
+  const fadeInTime = DIAGONAL_FADE_IN_BEATS * SEC_PER_BEAT;
+  const rotationTime = PIVOT_ROTATION_BEATS * SEC_PER_BEAT;
+  const lockinTime = PIVOT_LOCKIN_BEATS * SEC_PER_BEAT;
+  const chargeTime = PIVOT_CHARGE_BEATS * SEC_PER_BEAT;
+
+  const rotationEndTime = fadeInTime + rotationTime;
+  const lockinEndTime = rotationEndTime + lockinTime;
+
+  let opacity = 0;
+  let lineColor = DIAGONAL_COLOR_CHARGING;
+
+  // Calculate opacity and color based on phase
+  if (elapsed < fadeInTime) {
+    // Fade in
+    opacity = elapsed / fadeInTime;
+    lineColor = DIAGONAL_COLOR_CHARGING;
+  } else if (elapsed < rotationEndTime) {
+    // Rotation phase - white, medium opacity
+    opacity = 0.6;
+    lineColor = DIAGONAL_COLOR_CHARGING;
+  } else if (elapsed < lockinEndTime) {
+    // Lock-in phase - pulse white
+    const lockinProgress = (elapsed - rotationEndTime) / lockinTime;
+    opacity = 0.6 + 0.2 * Math.sin(lockinProgress * Math.PI * 8);
+    lineColor = DIAGONAL_COLOR_CHARGING;
+  } else {
+    // Charge phase - red, ramping up
+    const chargeProgress = (elapsed - lockinEndTime) / chargeTime;
+    opacity = 0.6 + 0.4 * chargeProgress;
+    lineColor = DIAGONAL_COLOR_LETHAL;
+  }
+
+  // Use currentAngle for pivoting rays
+  const { x1, y1, x2, y2 } = calculateDiagonalLineExtentsFromData(
+    attack.originX,
+    attack.originY,
+    attack.currentAngle
+  );
+
+  const glowWidth = DIAGONAL_LINE_WIDTH * DIAGONAL_GLOW_MULTIPLIER;
+
+  // Glow
+  gfx.lineStyle(glowWidth, lineColor, opacity * 0.15);
+  gfx.beginPath();
+  gfx.moveTo(x1, y1);
+  gfx.lineTo(x2, y2);
+  gfx.strokePath();
+
   // Core
   gfx.lineStyle(DIAGONAL_LINE_WIDTH, lineColor, opacity);
   gfx.beginPath();
@@ -1022,10 +1316,13 @@ function renderGlows(now) {
 // RAY EXPLOSION SYSTEM
 // ============================================================================
 function spawnRayExplosion(attack, explosionTime) {
+  // Use currentAngle for pivoting rays, angle for normal rays
+  const explosionAngle = attack.currentAngle !== undefined ? attack.currentAngle : attack.angle;
+
   activeRayExplosions.push({
     originX: attack.originX,
     originY: attack.originY,
-    angle: attack.angle,
+    angle: explosionAngle,
     birthTime: explosionTime
   });
 }
