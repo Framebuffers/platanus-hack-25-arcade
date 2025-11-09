@@ -237,6 +237,7 @@ function create() {
       strokeThickness: 2
     });
     txt.setOrigin(0.5, 0.5);
+    txt.setDepth(1000); // Ensure text renders on top
     txt.setVisible(false);
     textObjects.push(txt);
   }
