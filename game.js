@@ -178,12 +178,12 @@ let completedCycles = 0; // Number of completed full cycles (for difficulty prog
 // ============================================================================
 // GLOBAL STATE - HIGH SCORES
 // ============================================================================
-const HIGH_SCORE_KEY = 'vibebeater_highscores';
 const MAX_HIGH_SCORES = 10;
 const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 let nameEntryChars = ['A', 'A', 'A']; // Current name being entered
 let nameEntryIndex = 0; // Which character (0-2) is being edited
 let charSelectIndex = 0; // Index in NAME_CHARS for current character
+let highScoresData = []; // In-memory high scores (sandbox-compatible)
 
 // ============================================================================
 // GLOBAL STATE - PLAYER
@@ -558,35 +558,19 @@ function updateColorPalette() {
 // HIGH SCORE SYSTEM
 // ============================================================================
 function getHighScores() {
-  try {
-    const stored = localStorage.getItem(HIGH_SCORE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveHighScores(scores) {
-  try {
-    localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores));
-  } catch (e) {
-    // Silently fail if localStorage unavailable
-  }
+  return highScoresData;
 }
 
 function isHighScore(score) {
-  const scores = getHighScores();
-  if (scores.length < MAX_HIGH_SCORES) return true;
-  return score > scores[scores.length - 1].score;
+  if (highScoresData.length < MAX_HIGH_SCORES) return true;
+  return score > highScoresData[highScoresData.length - 1].score;
 }
 
 function addHighScore(name, score) {
-  const scores = getHighScores();
-  scores.push({ name, score });
-  scores.sort((a, b) => b.score - a.score);
-  const topScores = scores.slice(0, MAX_HIGH_SCORES);
-  saveHighScores(topScores);
-  return topScores;
+  highScoresData.push({ name, score });
+  highScoresData.sort((a, b) => b.score - a.score);
+  highScoresData = highScoresData.slice(0, MAX_HIGH_SCORES);
+  return highScoresData;
 }
 
 function getTopScore() {
