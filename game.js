@@ -1653,16 +1653,22 @@ function playBassNote(time, midi, velocity, duration) {
   osc.type = 'square';
   osc.frequency.value = freq;
 
-  // Resonant lowpass filter (acid sound)
+  // Resonant lowpass filter (classic TB-303 acid sound)
   filter.type = 'lowpass';
-  filter.Q.value = 18 + velocity * 15; // High resonance for acid sound (18-33)
-  filter.frequency.setValueAtTime(freq * 4, time); // Higher starting point
-  filter.frequency.exponentialRampToValueAtTime(freq * 0.3, time + 0.08); // Longer, deeper sweep
+  filter.Q.value = 20 + velocity * 20; // Very high resonance (20-40) for screaming acid
 
-  // Amplitude envelope (ADSR)
-  const attackTime = 0.005; // 5ms attack
-  const releaseTime = 0.05; // 50ms release
-  const sustainLevel = velocity * 0.3;
+  // Filter envelope: dramatic sweep based on velocity and note duration
+  const filterAttack = Math.min(duration * 0.3, 0.08); // Proportional to note length
+  const filterStart = freq * 8; // Higher starting point for more dramatic sweep
+  const filterEnd = freq * 0.25; // Lower end point for deeper bass
+
+  filter.frequency.setValueAtTime(filterStart, time);
+  filter.frequency.exponentialRampToValueAtTime(filterEnd, time + filterAttack);
+
+  // Amplitude envelope (ADSR) - tight and punchy
+  const attackTime = 0.003; // 3ms attack - very snappy
+  const releaseTime = 0.04; // 40ms release
+  const sustainLevel = velocity * 0.35; // Slightly louder
 
   gain.gain.setValueAtTime(0.01, time);
   gain.gain.exponentialRampToValueAtTime(sustainLevel, time + attackTime); // Attack
