@@ -171,10 +171,11 @@ let quarterNotesScore = 0; // Number of 1/32 notes survived (8 per beat)
 let audioCtx = null; // Web Audio context
 let musicStartTime = 0; // When music started
 let scheduledNodes = []; // Track all scheduled audio nodes for cleanup
-let currentCycleBars = 0; // Current bar in the 24-bar cycle
+let currentCycleBars = 0; // Current bar in the cycle
 let currentPalette = PALETTE_NORMAL; // Active color palette
 let paletteTransitionProgress = 0; // 0-1 for TYPE2 -> NORMAL fade
 let lastPhase = 'normal'; // Track last phase to detect changes
+let completedCycles = 0; // Number of completed full cycles (for difficulty progression)
 
 // ============================================================================
 // GLOBAL STATE - HIGH SCORES
@@ -363,6 +364,7 @@ function startGame(scene) {
   currentBPM = BPM_NORMAL;
   currentBgColor = BG_NORMAL;
   lastPhase = 'normal'; // Reset phase tracking
+  completedCycles = 0; // Reset difficulty progression
   SEC_PER_BEAT = 60 / currentBPM;
   SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
   quarterNotesScore = 0; // Reset score
@@ -472,7 +474,14 @@ function onMeasureComplete(now) {
 
   // Update color cycle (every bar)
   if (gameState === 'level') {
+    const previousBars = currentCycleBars;
     currentCycleBars = (currentCycleBars + 1) % CYCLE_TOTAL_BARS;
+
+    // Detect cycle completion (wrap from last bar back to 0)
+    if (previousBars === CYCLE_TOTAL_BARS - 1 && currentCycleBars === 0) {
+      completedCycles++;
+    }
+
     updateColorPalette();
   }
 }
@@ -691,7 +700,12 @@ function updateAttacks(scene, now) {
     if (Math.random() < PIVOT_SPAWN_CHANCE) {
       spawnPivotingRayPattern(now);
     } else {
-      spawnDiagonalLineAttack(now);
+      // Progressive difficulty: spawn additional rays based on completed cycles
+      // First cycle: 1 ray, second cycle: 2 rays, etc.
+      const numRays = Math.min(completedCycles + 1, 5); // Cap at 5 rays max
+      for (let i = 0; i < numRays; i++) {
+        spawnDiagonalLineAttack(now);
+      }
     }
     nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT * spawnMultiplier);
   }
