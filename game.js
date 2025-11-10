@@ -6,6 +6,7 @@ const config = {
   width: 800,
   height: 600,
   backgroundColor: '#0d0d0d',
+  banner: false,
   scene: { create, update }
 };
 
@@ -40,6 +41,10 @@ const CIRCLE_OF_FIFTHS = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5]; // Semitone off
 // Stem data - Format: [time, midi, velocity, duration]
 // STEM_KICK: Simple 4/4 kick pattern (4 kicks per 2 beats, repeated 4 times for 8 beats)
 const STEM_KICK=[[0,36,.787,.125],[.5,36,.787,.125],[1,36,.787,.125],[1.5,36,.787,.125],[2,36,.787,.125],[2.5,36,.787,.125],[3,36,.787,.125],[3.5,36,.787,.125],[4,36,.787,.125],[4.5,36,.787,.125],[5,36,.787,.125],[5.5,36,.787,.125],[6,36,.787,.125],[6.5,36,.787,.125],[7,36,.787,.125],[7.5,36,.787,.125]];
+// STEM_TRANSITION: Mode change melody (G2, B2 pattern, ~2 beats)
+const STEM_TRANSITION=[[0,43,1,.198],[.25,43,1,.318],[.625,43,1,.068],[.745,47,1,.073],[.875,43,1,.068],[1,47,1,.068],[1.125,43,1,.193],[1.375,47,.583,.068],[1.5,43,1,.318],[1.87,47,1,.073]];
+// STEM_STRESS: Stress mode melody (G#1, G#2, C1, A3 pattern, looped to 8 beats)
+const STEM_STRESS=[[0,32,1,.068],[.125,32,1,.073],[.25,32,1,.073],[.375,44,.504,.141],[.5,32,.504,.156],[.641,44,.504,.141],[.766,32,.504,.141],[.891,44,.504,.125],[1,24,.504,.219],[1.245,57,1,.193],[1.5,33,.504,.073],[1.641,57,1,.068],[1.766,57,1,.068],[1.891,57,1,.068],[2,32,1,.068],[2.125,32,1,.073],[2.25,32,1,.073],[2.375,44,.504,.141],[2.5,32,.504,.156],[2.641,44,.504,.141],[2.766,32,.504,.141],[2.891,44,.504,.125],[3,24,.504,.219],[3.245,57,1,.193],[3.5,33,.504,.073],[3.641,57,1,.068],[3.766,57,1,.068],[3.891,57,1,.068],[4,32,1,.068],[4.125,32,1,.073],[4.25,32,1,.073],[4.375,44,.504,.141],[4.5,32,.504,.156],[4.641,44,.504,.141],[4.766,32,.504,.141],[4.891,44,.504,.125],[5,24,.504,.219],[5.245,57,1,.193],[5.5,33,.504,.073],[5.641,57,1,.068],[5.766,57,1,.068],[5.891,57,1,.068],[6,32,1,.068],[6.125,32,1,.073],[6.25,32,1,.073],[6.375,44,.504,.141],[6.5,32,.504,.156],[6.641,44,.504,.141],[6.766,32,.504,.141],[6.891,44,.504,.125],[7,24,.504,.219],[7.245,57,1,.193],[7.5,33,.504,.073],[7.641,57,1,.068],[7.766,57,1,.068],[7.891,57,1,.068]];
 const STEM_BASS_1=[[0,36,.787,.125],[.125,36,.787,.125],[.25,36,.787,.125],[.375,36,.787,.125],[.546875,48,.787,.203125],[.75,36,.787,.125],[.875,48,.787,.125],[1,36,.787,.125],[1.125,48,.787,.125],[1.25,48,.787,.125],[1.375,48,.787,.125],[1.5,39,.787,.125],[1.625,48,.787,.125],[1.75,49,.787,.25],[2,36,.787,.125],[2.125,36,.787,.125],[2.25,36,.787,.125],[2.375,36,.787,.125],[2.53125,48,.787,.21875],[2.75,36,.787,.125],[2.875,48,.787,.125],[3,36,.787,.125],[3.125,48,.787,.125],[3.25,48,.787,.125],[3.375,48,.787,.125],[3.5,37,.787,.125],[3.625,48,.787,.125],[3.75,49,.787,.25],[4,36,.787,.125],[4.125,36,.787,.125],[4.25,36,.787,.125],[4.375,36,.787,.125],[4.53125,48,.787,.21875],[4.75,36,.787,.125],[4.875,48,.787,.125],[5,36,.787,.125],[5.125,48,.787,.125],[5.25,48,.787,.125],[5.375,48,.787,.125],[5.5,37,.787,.125],[5.625,48,.787,.125],[5.75,49,.787,.25],[6,35,.787,.125],[6.125,35,.787,.125],[6.25,35,.787,.125],[6.375,35,.787,.125],[6.53125,47,.787,.21875],[6.75,35,.787,.125],[6.875,47,.787,.125],[7,35,.787,.125],[7.125,47,.787,.125],[7.25,47,.787,.125],[7.375,47,.787,.125],[7.5,36,.787,.125],[7.625,47,.787,.125],[7.75,48,.787,.25]];
 const STEM_BASS_2=[[0,37,.787,.125],[.125,37,.787,.125],[.25,37,.787,.125],[.375,37,.787,.125],[.5,49,.787,.197917],[.75,36,.787,.125],[.75,49,.787,.125],[.875,48,.787,.125],[1,36,.787,.125],[1.125,50,.787,.125],[1.25,50,.787,.125],[1.375,50,.787,.125],[1.5,39,.787,.125],[1.625,48,.787,.125],[1.75,49,.787,.25],[2,38,.787,.125],[2.125,38,.787,.125],[2.25,38,.787,.125],[2.375,38,.787,.125],[2.5,50,.787,.197917],[2.75,37,.787,.125],[2.75,50,.787,.125],[2.875,49,.787,.125],[3,37,.787,.125],[3.125,49,.787,.125],[3.25,49,.787,.125],[3.375,49,.787,.125],[3.5,40,.787,.125],[3.625,49,.787,.125],[3.75,48,.787,.25],[4,37,.787,.125],[4.125,37,.787,.125],[4.25,37,.787,.125],[4.375,37,.787,.125],[4.75,36,.787,.125],[5,36,.787,.125],[5,48,.787,.125],[5.125,48,.787,.125],[5.25,48,.787,.125],[5.375,48,.787,.125],[5.5,39,.787,.125],[5.625,35,.787,.375],[6,36,.787,.125],[6,60,.787,.125],[6.125,60,.787,.125],[6.25,60,.787,.125],[6.375,60,.787,.125],[6.5,35,.787,.125],[6.625,35,.787,.125],[6.75,39,.787,.125],[6.875,39,.787,.125],[7,39,.787,.125],[7.125,72,.787,.125],[7.25,72,.787,.125],[7.375,84,.787,.125],[7.5,84,.787,.125],[7.625,84,.787,.125],[7.75,48,.787,.125],[7.875,48,.787,.125]];
 const STEM_DURATION=8;
@@ -100,7 +105,7 @@ const DIAGONAL_COLOR_CHARGING = 0xFFFFFF;
 const DIAGONAL_COLOR_LETHAL = 0xFF0000;
 const DIAGONAL_GLOW_MULTIPLIER = 5;
 const DIAGONAL_ATTACK_INTERVAL_BEATS = 4; // Spawn every bar (2x faster)
-const DIAGONAL_EXPLOSION_FADE_TIME = 1.0; // Ray explosion fade duration in seconds
+const DIAGONAL_EXPLOSION_FADE_TIME = 0.4; // Ray explosion fade duration in seconds
 const DIAGONAL_EXPLOSION_SIZE_MULTIPLIER = 3.0; // 300% size for explosion
 
 // Pivoting ray pattern
@@ -304,7 +309,18 @@ function update() {
     // Loop music patterns every STEM_DURATION seconds
     if (now - musicStartTime >= STEM_DURATION) {
       musicStartTime += STEM_DURATION;
-      schedulePattern(currentBassStem, musicStartTime, true);
+
+      // Determine which pattern to use based on current phase
+      let activeBassPattern;
+      if (currentCycleBars >= CYCLE_NORMAL_BARS && currentCycleBars < CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS) {
+        // Stress phase (bars 6-9): use stress melody
+        activeBassPattern = STEM_STRESS;
+      } else {
+        // Normal or Type2 phase: use normal bass patterns
+        activeBassPattern = currentBassStem;
+      }
+
+      schedulePattern(activeBassPattern, musicStartTime, true);
       schedulePattern(currentBreakStem, musicStartTime, false);
     }
   }
@@ -488,6 +504,25 @@ function updateColorPalette() {
   if (currentPhase !== lastPhase) {
     currentKeyIndex = (currentKeyIndex + 1) % CIRCLE_OF_FIFTHS.length;
     lastPhase = currentPhase;
+
+    // Immediately stop all music and start new phase pattern
+    if (audioCtx) {
+      const now = audioCtx.currentTime;
+      stopAllMusic();
+
+      // Determine which bass pattern to use for the new phase
+      let newBassPattern;
+      if (currentPhase === 'stress') {
+        newBassPattern = STEM_STRESS;
+      } else {
+        newBassPattern = currentBassStem;
+      }
+
+      // Restart music immediately with new pattern
+      musicStartTime = now;
+      schedulePattern(newBassPattern, now, true);
+      schedulePattern(currentBreakStem, now, false);
+    }
   }
 
   // Recalculate timing constants
@@ -1601,11 +1636,11 @@ function playBassNote(time, midi, velocity, duration) {
   osc.type = 'square';
   osc.frequency.value = freq;
 
-  // Resonant lowpass filter
+  // Resonant lowpass filter (acid sound)
   filter.type = 'lowpass';
-  filter.Q.value = 8 + velocity * 12; // Accent affects resonance
-  filter.frequency.setValueAtTime(freq * 2, time);
-  filter.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.05);
+  filter.Q.value = 18 + velocity * 10; // High resonance for acid sound (18-33)
+  filter.frequency.setValueAtTime(freq * 4, time); // Higher starting point
+  filter.frequency.exponentialRampToValueAtTime(freq * 0.3, time + 0.08); // Longer, deeper sweep
 
   // Amplitude envelope
   gain.gain.setValueAtTime(velocity * 0.3, time);
@@ -1775,17 +1810,20 @@ function playHat(time, velocity, duration) {
   scheduledNodes.push(noise);
 }
 
-function schedulePattern(stem, startTime, isBass) {
+function schedulePattern(stem, startTime, isBass, minTime = -Infinity, maxTime = Infinity) {
   if (!audioCtx || !stem) return;
 
   stem.forEach(note => {
     const [time, midi, velocity, duration] = note;
     const absoluteTime = startTime + time;
 
-    if (isBass) {
-      playBassNote(absoluteTime, midi, velocity, duration);
-    } else {
-      playDrum(absoluteTime, midi, velocity, duration);
+    // Only schedule notes within the allowed time range
+    if (time >= minTime && time < maxTime) {
+      if (isBass) {
+        playBassNote(absoluteTime, midi, velocity, duration);
+      } else {
+        playDrum(absoluteTime, midi, velocity, duration);
+      }
     }
   });
 }
