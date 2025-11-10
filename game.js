@@ -6,6 +6,7 @@ const config = {
   width: 800,
   height: 600,
   backgroundColor: '#0d0d0d',
+  banner: false,
   scene: { create, update }
 };
 
@@ -38,11 +39,17 @@ let SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
 const CIRCLE_OF_FIFTHS = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5]; // Semitone offsets from C
 
 // Stem data - Format: [time, midi, velocity, duration]
-const STEM_BASS_1=[[0,36,.787,.125],[.125,36,.787,.125],[.25,36,.787,.125],[.375,36,.787,.125],[.546875,48,.787,.203125],[.75,36,.787,.125],[.875,48,.787,.125],[1,36,.787,.125],[1.125,48,.787,.125],[1.25,48,.787,.125],[1.375,48,.787,.125],[1.5,39,.787,.125],[1.625,48,.787,.125],[1.75,49,.787,.25],[2,36,.787,.125],[2.125,36,.787,.125],[2.25,36,.787,.125],[2.375,36,.787,.125],[2.53125,48,.787,.21875],[2.75,36,.787,.125],[2.875,48,.787,.125],[3,36,.787,.125],[3.125,48,.787,.125],[3.25,48,.787,.125],[3.375,48,.787,.125],[3.5,37,.787,.125],[3.625,48,.787,.125],[3.75,49,.787,.25],[4,36,.787,.125],[4.125,36,.787,.125],[4.25,36,.787,.125],[4.375,36,.787,.125],[4.53125,48,.787,.21875],[4.75,36,.787,.125],[4.875,48,.787,.125],[5,36,.787,.125],[5.125,48,.787,.125],[5.25,48,.787,.125],[5.375,48,.787,.125],[5.5,37,.787,.125],[5.625,48,.787,.125],[5.75,49,.787,.25],[6,35,.787,.125],[6.125,35,.787,.125],[6.25,35,.787,.125],[6.375,35,.787,.125],[6.53125,47,.787,.21875],[6.75,35,.787,.125],[6.875,47,.787,.125],[7,35,.787,.125],[7.125,47,.787,.125],[7.25,47,.787,.125],[7.375,47,.787,.125],[7.5,36,.787,.125],[7.625,47,.787,.125],[7.75,48,.787,.25]];
-const STEM_BASS_2=[[0,37,.787,.125],[.125,37,.787,.125],[.25,37,.787,.125],[.375,37,.787,.125],[.5,49,.787,.197917],[.75,36,.787,.125],[.75,49,.787,.125],[.875,48,.787,.125],[1,36,.787,.125],[1.125,50,.787,.125],[1.25,50,.787,.125],[1.375,50,.787,.125],[1.5,39,.787,.125],[1.625,48,.787,.125],[1.75,49,.787,.25],[2,38,.787,.125],[2.125,38,.787,.125],[2.25,38,.787,.125],[2.375,38,.787,.125],[2.5,50,.787,.197917],[2.75,37,.787,.125],[2.75,50,.787,.125],[2.875,49,.787,.125],[3,37,.787,.125],[3.125,49,.787,.125],[3.25,49,.787,.125],[3.375,49,.787,.125],[3.5,40,.787,.125],[3.625,49,.787,.125],[3.75,48,.787,.25],[4,37,.787,.125],[4.125,37,.787,.125],[4.25,37,.787,.125],[4.375,37,.787,.125],[4.75,36,.787,.125],[5,36,.787,.125],[5,48,.787,.125],[5.125,48,.787,.125],[5.25,48,.787,.125],[5.375,48,.787,.125],[5.5,39,.787,.125],[5.625,35,.787,.375],[6,36,.787,.125],[6,60,.787,.125],[6.125,60,.787,.125],[6.25,60,.787,.125],[6.375,60,.787,.125],[6.5,35,.787,.125],[6.625,35,.787,.125],[6.75,39,.787,.125],[6.875,39,.787,.125],[7,39,.787,.125],[7.125,72,.787,.125],[7.25,72,.787,.125],[7.375,84,.787,.125],[7.5,84,.787,.125],[7.625,84,.787,.125],[7.75,48,.787,.125],[7.875,48,.787,.125]];
-const STEM_BREAK_1=[[0,36,1,.25],[0,45,.756,.25],[.25,36,1,.25],[.25,45,.504,.25],[.5,37,1,.25],[.5,45,1,.25],[.75,40,1,.25],[.75,45,.504,.25],[.885417,38,1,.125],[1,40,1,.25],[1,45,.756,.25],[1.135417,38,1,.125],[1.25,36,1,.125],[1.25,45,.504,.25],[1.385417,36,.709,.125],[1.5,37,1,.375],[1.5,45,1,.25],[1.75,40,1,.25],[1.75,45,.504,.25],[2,36,1,.25],[2,45,.756,.25],[2.25,36,1,.25],[2.25,45,.504,.25],[2.5,37,1,.25],[2.5,45,1,.25],[2.75,40,1,.25],[2.75,45,.504,.25],[2.885417,38,1,.125],[3,40,1,.25],[3,45,.756,.25],[3.135417,38,1,.125],[3.25,36,1,.125],[3.25,45,.504,.25],[3.5,40,1,.25],[3.5,45,.504,.25],[3.75,37,1,.375],[3.75,45,1,.25],[4,40,1,.25],[4,45,.756,.25],[4.25,36,1,.125],[4.25,45,.504,.25],[4.385417,36,.866,.125],[4.5,37,1,.25],[4.5,45,1,.25],[4.75,40,1,.25],[4.75,45,.504,.25],[4.885417,38,1,.125],[5,40,1,.25],[5,45,.756,.25],[5.135417,38,1,.125],[5.25,36,1,.25],[5.25,43,1,.25],[5.25,45,.504,.25],[5.5,37,1,.25],[5.5,45,.756,.25],[5.75,37,1,.375],[5.75,40,1,.25],[5.75,45,.504,.25],[6,40,1,.25],[6,45,.756,.25],[6.25,36,1,.125],[6.25,45,.504,.25],[6.385417,36,.866,.125],[6.5,37,1,.25],[6.5,45,1,.25],[6.75,40,1,.25],[6.75,45,.504,.25],[6.885417,38,1,.125],[7,40,1,.25],[7,45,.756,.25],[7.135417,38,1,.125],[7.25,36,1,.25],[7.25,43,1,.25],[7.25,45,.504,.25],[7.5,37,1,.25],[7.5,45,.756,.25],[7.75,40,1,.25],[7.75,45,.504,.25]];
-const STEM_BREAK_2=[[0,36,1,.25],[0,45,.756,.25],[.010417,38,1,.125],[.25,36,1,.25],[.25,45,.504,.25],[.260417,38,1,.125],[.5,37,1,.25],[.5,45,1,.25],[.75,40,1,.25],[.75,45,.504,.25],[1,38,1,.125],[1,40,1,.25],[1,45,.756,.25],[1.125,38,1,.125],[1.25,36,1,.125],[1.25,38,1,.125],[1.25,45,.504,.25],[1.375,38,1,.125],[1.385417,36,.709,.125],[1.5,37,1,.375],[1.5,38,1,.125],[1.5,45,1,.25],[1.75,40,1,.25],[1.75,45,.504,.25],[2,36,1,.25],[2,38,1,.125],[2,45,.756,.25],[2.25,36,1,.25],[2.25,38,1,.125],[2.25,45,.504,.25],[2.5,37,1,.25],[2.5,45,1,.25],[2.75,40,1,.25],[2.75,45,.504,.25],[3,40,1,.25],[3,45,.756,.25],[3.25,36,1,.125],[3.25,45,.504,.25],[3.5,40,1,.25],[3.5,45,.504,.25],[3.75,37,1,.375],[3.75,38,.787,.25],[3.75,45,1,.25],[4,40,1,.25],[4,45,.756,.25],[4.25,36,1,.125],[4.25,45,.504,.25],[4.385417,36,.866,.125],[4.5,37,1,.25],[4.5,45,1,.25],[4.75,40,1,.25],[4.75,45,.504,.25],[5,40,1,.25],[5,45,.756,.25],[5.010417,38,1,.125],[5.135417,38,1,.125],[5.25,36,1,.25],[5.25,43,1,.25],[5.25,45,.504,.25],[5.260417,38,1,.125],[5.385417,38,1,.114583],[5.5,37,1,.25],[5.5,38,1,.125],[5.5,45,.756,.25],[5.75,40,1,.25],[5.75,45,.504,.25],[6,36,1,.25],[6,45,.756,.25],[6.25,36,1,.25],[6.25,45,.504,.25],[6.5,37,1,.25],[6.5,45,1,.25],[6.75,40,1,.25],[6.75,45,.504,.25],[7,40,1,.25],[7,45,.756,.25],[7.010417,38,1,.125],[7.135417,38,1,.125],[7.25,36,1,.125],[7.25,45,.504,.25],[7.260417,38,1,.125],[7.385417,38,1,.114583],[7.5,38,1,.125],[7.5,40,1,.25],[7.5,45,.504,.25],[7.75,37,1,.375],[7.75,45,1,.25]];
-const STEM_DURATION=8;
+// STEM_KICK: Simple 4/4 kick pattern (4 kicks per 2 beats, repeated 4 times for 8 beats)
+const STEM_KICK=[[0,36,.787,.125],[.5,36,.787,.125],[1,36,.787,.125],[1.5,36,.787,.125],[2,36,.787,.125],[2.5,36,.787,.125],[3,36,.787,.125],[3.5,36,.787,.125],[4,36,.787,.125],[4.5,36,.787,.125],[5,36,.787,.125],[5.5,36,.787,.125],[6,36,.787,.125],[6.5,36,.787,.125],[7,36,.787,.125],[7.5,36,.787,.125]];
+// STEM_TRANSITION: Mode change melody (G2, B2 pattern, ~2 beats)
+const STEM_TRANSITION=[[0,43,1,.198],[.25,43,1,.318],[.625,43,1,.068],[.745,47,1,.073],[.875,43,1,.068],[1,47,1,.068],[1.125,43,1,.193],[1.375,47,.583,.068],[1.5,43,1,.318],[1.87,47,1,.073]];
+// STEM_NORMAL: Normal mode melody (C2, C3 bass pattern, looped to 8 beats)
+const STEM_NORMAL=[[0,36,1,.068],[.25,36,.504,.073],[.375,48,1,.068],[.625,36,.504,.068],[.75,36,.504,.068],[1,36,1,.068],[1.12,36,.504,.078],[1.245,48,.504,.073],[1.375,36,.504,.073],[1.625,36,.504,.068],[1.75,36,.504,.068],[2,36,1,.068],[2.25,36,.504,.073],[2.375,48,1,.068],[2.625,36,.504,.068],[2.75,36,.504,.068],[3,36,1,.068],[3.12,36,.504,.078],[3.245,48,.504,.073],[3.375,36,.504,.073],[3.625,36,.504,.068],[3.75,36,.504,.068],[4,36,1,.068],[4.25,36,.504,.073],[4.375,48,1,.068],[4.625,36,.504,.068],[4.75,36,.504,.068],[5,36,1,.068],[5.12,36,.504,.078],[5.245,48,.504,.073],[5.375,36,.504,.073],[5.625,36,.504,.068],[5.75,36,.504,.068],[6,36,1,.068],[6.25,36,.504,.073],[6.375,48,1,.068],[6.625,36,.504,.068],[6.75,36,.504,.068],[7,36,1,.068],[7.12,36,.504,.078],[7.245,48,.504,.073],[7.375,36,.504,.073],[7.625,36,.504,.068],[7.75,36,.504,.068]];
+// STEM_STRESS: Stress mode melody (G#1, G#2, C1, A3 pattern, looped to 8 beats)
+const STEM_STRESS=[[0,32,1,.068],[.125,32,1,.073],[.25,32,1,.073],[.375,44,.504,.141],[.5,32,.504,.156],[.641,44,.504,.141],[.766,32,.504,.141],[.891,44,.504,.125],[1,24,.504,.219],[1.245,57,1,.193],[1.5,33,.504,.073],[1.641,57,1,.068],[1.766,57,1,.068],[1.891,57,1,.068],[2,32,1,.068],[2.125,32,1,.073],[2.25,32,1,.073],[2.375,44,.504,.141],[2.5,32,.504,.156],[2.641,44,.504,.141],[2.766,32,.504,.141],[2.891,44,.504,.125],[3,24,.504,.219],[3.245,57,1,.193],[3.5,33,.504,.073],[3.641,57,1,.068],[3.766,57,1,.068],[3.891,57,1,.068],[4,32,1,.068],[4.125,32,1,.073],[4.25,32,1,.073],[4.375,44,.504,.141],[4.5,32,.504,.156],[4.641,44,.504,.141],[4.766,32,.504,.141],[4.891,44,.504,.125],[5,24,.504,.219],[5.245,57,1,.193],[5.5,33,.504,.073],[5.641,57,1,.068],[5.766,57,1,.068],[5.891,57,1,.068],[6,32,1,.068],[6.125,32,1,.073],[6.25,32,1,.073],[6.375,44,.504,.141],[6.5,32,.504,.156],[6.641,44,.504,.141],[6.766,32,.504,.141],[6.891,44,.504,.125],[7,24,.504,.219],[7.245,57,1,.193],[7.5,33,.504,.073],[7.641,57,1,.068],[7.766,57,1,.068],[7.891,57,1,.068]];
+// STEM_STRESS_TYPE2_DRUMS: Complex drum pattern for stress and type2 phases (74 notes, 8 beats)
+const STEM_STRESS_TYPE2_DRUMS=[[0,36,1,.375],[0,46,.906,.125],[.25,40,1,.25],[.25,46,.906,.125],[.5,37,1,.125],[.5,46,.906,.125],[.75,36,1,.125],[.75,40,1,.25],[.75,46,.906,.125],[1,46,.906,.125],[1.25,37,1,.375],[1.25,40,1,.25],[1.25,46,.906,.125],[1.5,40,1,.125],[1.5,46,.906,.125],[1.635,38,1,.125],[1.75,40,1,.25],[1.75,46,.906,.125],[2,36,1,.5],[2,43,.787,.375],[2,46,.906,.125],[2.25,40,1,.25],[2.25,46,.906,.125],[2.5,37,1,.125],[2.5,46,.906,.125],[2.75,36,1,.125],[2.75,40,1,.25],[2.75,46,.906,.125],[3,46,.906,.125],[3.25,37,1,.375],[3.25,40,1,.25],[3.25,46,.906,.125],[3.5,40,1,.125],[3.5,46,.906,.125],[3.635,38,1,.125],[3.75,40,1,.25],[3.75,46,.906,.125],[4,36,1,.375],[4,46,.906,.125],[4.25,40,1,.25],[4.25,46,.906,.125],[4.5,37,1,.125],[4.5,46,.906,.125],[4.75,36,1,.125],[4.75,40,1,.25],[4.75,46,.906,.125],[5,46,.906,.125],[5.25,37,1,.375],[5.25,40,1,.25],[5.25,46,.906,.125],[5.5,40,1,.125],[5.5,46,.906,.125],[5.635,38,1,.125],[5.75,40,1,.25],[5.75,46,.906,.125],[6,36,1,.5],[6,43,.787,.375],[6,46,.906,.125],[6.25,40,1,.25],[6.25,46,.906,.125],[6.5,37,1,.125],[6.5,46,.906,.125],[6.75,36,1,.125],[6.75,40,1,.25],[6.75,46,.906,.125],[7,46,.906,.125],[7.25,37,1,.375],[7.25,40,1,.25],[7.25,46,.906,.125],[7.5,40,1,.125],[7.5,46,.906,.125],[7.635,38,1,.125],[7.75,40,1,.25],[7.75,46,.906,.125]];
+const STEM_BEATS=8; // All stems are 8 beats (2 bars) long
 
 // ============================================================================
 // GLOBAL CONSTANTS - GRID
@@ -64,11 +71,11 @@ const BG_STRESS = 0x1a0000; // Dark red tint
 const BG_TYPE_2 = 0x0f0f0f; // Lighter gray
 let currentBgColor = BG_NORMAL;
 
-// Cycle timing (in bars)
-const CYCLE_NORMAL_BARS = 6;
-const CYCLE_STRESS_BARS = 4;
-const CYCLE_TYPE2_BARS = 2;
-const CYCLE_TOTAL_BARS = CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS + CYCLE_TYPE2_BARS; // 12 bars
+// Cycle timing (in bars) - aligned with 2-bar stems (8 beats each)
+const CYCLE_NORMAL_BARS = 8;  // 3 stems (6 bars = 24 beats)
+const CYCLE_STRESS_BARS = 8;  // 2 stems (6 bars = 24 beats)
+const CYCLE_TYPE2_BARS = 4;   // 3 stems (6 bars = 24 beats) - matches normal
+const CYCLE_TOTAL_BARS = CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS + CYCLE_TYPE2_BARS; // 16 bars
 
 // Grid flash feedback
 const GRID_FLASH_DURATION = 0.1; // Flash duration in seconds
@@ -100,7 +107,7 @@ const DIAGONAL_COLOR_CHARGING = 0xFFFFFF;
 const DIAGONAL_COLOR_LETHAL = 0xFF0000;
 const DIAGONAL_GLOW_MULTIPLIER = 5;
 const DIAGONAL_ATTACK_INTERVAL_BEATS = 4; // Spawn every bar (2x faster)
-const DIAGONAL_EXPLOSION_FADE_TIME = 1.0; // Ray explosion fade duration in seconds
+const DIAGONAL_EXPLOSION_FADE_TIME = 0.4; // Ray explosion fade duration in seconds
 const DIAGONAL_EXPLOSION_SIZE_MULTIPLIER = 3.0; // 300% size for explosion
 
 // Pivoting ray pattern
@@ -162,14 +169,13 @@ let lastInputWasSynced = false; // Was last input on beat?
 let scoreFlashTime = 0; // Time when score should flash red
 let quarterNotesScore = 0; // Number of 1/32 notes survived (8 per beat)
 let audioCtx = null; // Web Audio context
-let currentBassStem = null; // Current bass pattern
-let currentBreakStem = null; // Current break pattern
 let musicStartTime = 0; // When music started
 let scheduledNodes = []; // Track all scheduled audio nodes for cleanup
-let currentCycleBars = 0; // Current bar in the 24-bar cycle
+let currentCycleBars = 0; // Current bar in the cycle
 let currentPalette = PALETTE_NORMAL; // Active color palette
 let paletteTransitionProgress = 0; // 0-1 for TYPE2 -> NORMAL fade
 let lastPhase = 'normal'; // Track last phase to detect changes
+let completedCycles = 0; // Number of completed full cycles (for difficulty progression)
 
 // ============================================================================
 // GLOBAL STATE - HIGH SCORES
@@ -245,11 +251,9 @@ function create() {
 
   stateChangeTime = scene.sound.context.currentTime;
 
-  // Initialize audio context and select random stems
+  // Initialize audio context
   audioCtx = scene.sound.context;
   currentKeyIndex = Phaser.Math.Between(0, CIRCLE_OF_FIFTHS.length - 1);
-  currentBassStem = Phaser.Math.RND.pick([STEM_BASS_1, STEM_BASS_2]);
-  currentBreakStem = Phaser.Math.RND.pick([STEM_BREAK_1, STEM_BREAK_2]);
 
   // Add action buttons for rhythm input
   const actionKeys = scene.input.keyboard.addKeys({
@@ -301,11 +305,34 @@ function update() {
     updateGlows(now);
     updateRayExplosions(now);
 
-    // Loop music patterns every STEM_DURATION seconds
-    if (now - musicStartTime >= STEM_DURATION) {
-      musicStartTime += STEM_DURATION;
-      schedulePattern(currentBassStem, musicStartTime, true);
-      schedulePattern(currentBreakStem, musicStartTime, false);
+    // Music plays at constant 120 BPM regardless of game BPM
+    // Stems are 8 beats long at 120 BPM = 4 seconds
+    const stemDuration = (STEM_BEATS * 60) / 120;
+
+    // Loop music patterns every stem duration
+    if (now - musicStartTime >= stemDuration) {
+      musicStartTime += stemDuration;
+
+      // Determine which patterns to use based on current phase
+      let activeBassPattern;
+      let activeDrumPattern;
+
+      if (currentCycleBars >= CYCLE_NORMAL_BARS && currentCycleBars < CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS) {
+        // Stress phase (bars 6-9): use stress melody and complex drums
+        activeBassPattern = STEM_STRESS;
+        activeDrumPattern = STEM_STRESS_TYPE2_DRUMS;
+      } else if (currentCycleBars >= CYCLE_NORMAL_BARS + CYCLE_STRESS_BARS) {
+        // Type2 phase (bars 10-11): use normal melody and complex drums
+        activeBassPattern = STEM_NORMAL;
+        activeDrumPattern = STEM_STRESS_TYPE2_DRUMS;
+      } else {
+        // Normal phase (bars 0-5): use normal melody and simple kick
+        activeBassPattern = STEM_NORMAL;
+        activeDrumPattern = STEM_KICK;
+      }
+
+      schedulePattern(activeBassPattern, musicStartTime, true);
+      schedulePattern(activeDrumPattern, musicStartTime, false);
     }
   }
 
@@ -337,6 +364,7 @@ function startGame(scene) {
   currentBPM = BPM_NORMAL;
   currentBgColor = BG_NORMAL;
   lastPhase = 'normal'; // Reset phase tracking
+  completedCycles = 0; // Reset difficulty progression
   SEC_PER_BEAT = 60 / currentBPM;
   SEC_PER_BAR = BEATS_PER_BAR * SEC_PER_BEAT;
   quarterNotesScore = 0; // Reset score
@@ -347,8 +375,8 @@ function startGame(scene) {
   // Stop any existing music and start fresh
   stopAllMusic();
   musicStartTime = now;
-  schedulePattern(currentBassStem, now, true);
-  schedulePattern(currentBreakStem, now, false);
+  schedulePattern(STEM_NORMAL, now, true); // Start with normal melody
+  schedulePattern(STEM_KICK, now, false); // Start with simple kick pattern
 }
 
 function restartGame(scene) {
@@ -446,7 +474,14 @@ function onMeasureComplete(now) {
 
   // Update color cycle (every bar)
   if (gameState === 'level') {
+    const previousBars = currentCycleBars;
     currentCycleBars = (currentCycleBars + 1) % CYCLE_TOTAL_BARS;
+
+    // Detect cycle completion (wrap from last bar back to 0)
+    if (previousBars === CYCLE_TOTAL_BARS - 1 && currentCycleBars === 0) {
+      completedCycles++;
+    }
+
     updateColorPalette();
   }
 }
@@ -488,6 +523,32 @@ function updateColorPalette() {
   if (currentPhase !== lastPhase) {
     currentKeyIndex = (currentKeyIndex + 1) % CIRCLE_OF_FIFTHS.length;
     lastPhase = currentPhase;
+
+    // Stop all music and restart with new BPM to prevent overlapping
+    if (audioCtx) {
+      const now = audioCtx.currentTime;
+      stopAllMusic();
+
+      // Determine which patterns to use for the new phase
+      let newBassPattern;
+      let newDrumPattern;
+
+      if (currentPhase === 'stress') {
+        newBassPattern = STEM_STRESS;
+        newDrumPattern = STEM_STRESS_TYPE2_DRUMS;
+      } else if (currentPhase === 'type2') {
+        newBassPattern = STEM_NORMAL;
+        newDrumPattern = STEM_STRESS_TYPE2_DRUMS;
+      } else {
+        newBassPattern = STEM_NORMAL;
+        newDrumPattern = STEM_KICK;
+      }
+
+      // Reset music start time and schedule new patterns at new BPM
+      musicStartTime = now;
+      schedulePattern(newBassPattern, now, true);
+      schedulePattern(newDrumPattern, now, false);
+    }
   }
 
   // Recalculate timing constants
@@ -639,7 +700,12 @@ function updateAttacks(scene, now) {
     if (Math.random() < PIVOT_SPAWN_CHANCE) {
       spawnPivotingRayPattern(now);
     } else {
-      spawnDiagonalLineAttack(now);
+      // Progressive difficulty: spawn additional rays based on completed cycles
+      // First cycle: 1 ray, second cycle: 2 rays, etc.
+      const numRays = Math.min(completedCycles + 1, 5); // Cap at 5 rays max
+      for (let i = 0; i < numRays; i++) {
+        spawnDiagonalLineAttack(now);
+      }
     }
     nextAttackTime = now + (DIAGONAL_ATTACK_INTERVAL_BEATS * SEC_PER_BEAT * spawnMultiplier);
   }
@@ -1601,15 +1667,27 @@ function playBassNote(time, midi, velocity, duration) {
   osc.type = 'square';
   osc.frequency.value = freq;
 
-  // Resonant lowpass filter
+  // Resonant lowpass filter (classic TB-303 acid sound)
   filter.type = 'lowpass';
-  filter.Q.value = 8 + velocity * 12; // Accent affects resonance
-  filter.frequency.setValueAtTime(freq * 2, time);
-  filter.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.05);
+  filter.Q.value = 20 + velocity * 20; // Very high resonance (20-40) for screaming acid
 
-  // Amplitude envelope
-  gain.gain.setValueAtTime(velocity * 0.3, time);
-  gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+  // Filter envelope: dramatic sweep based on velocity and note duration
+  const filterAttack = Math.min(duration * 0.3, 0.08); // Proportional to note length
+  const filterStart = freq * 8; // Higher starting point for more dramatic sweep
+  const filterEnd = freq * 0.25; // Lower end point for deeper bass
+
+  filter.frequency.setValueAtTime(filterStart, time);
+  filter.frequency.exponentialRampToValueAtTime(filterEnd, time + filterAttack);
+
+  // Amplitude envelope (ADSR) - tight and punchy
+  const attackTime = 0.003; // 3ms attack - very snappy
+  const releaseTime = 0.04; // 40ms release
+  const sustainLevel = velocity * 0.35; // Slightly louder
+
+  gain.gain.setValueAtTime(0.01, time);
+  gain.gain.exponentialRampToValueAtTime(sustainLevel, time + attackTime); // Attack
+  gain.gain.setValueAtTime(sustainLevel, time + duration - releaseTime); // Sustain
+  gain.gain.exponentialRampToValueAtTime(0.01, time + duration); // Release
 
   osc.connect(filter);
   filter.connect(gain);
@@ -1655,10 +1733,12 @@ function playKickDrum(time, velocity) {
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
 
-  osc.frequency.setValueAtTime(120, time);
+  osc.frequency.setValueAtTime(150, time);
   osc.frequency.exponentialRampToValueAtTime(40, time + 0.05);
 
-  gain.gain.setValueAtTime(velocity * 0.8, time);
+  // Envelope with quick attack and exponential decay
+  gain.gain.setValueAtTime(0.01, time);
+  gain.gain.exponentialRampToValueAtTime(velocity * 0.8, time + 0.002); // Fast attack
   gain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
 
   osc.connect(gain);
@@ -1684,7 +1764,8 @@ function playSnare(time, velocity) {
   noiseFilter.frequency.value = 2000;
 
   const noiseGain = audioCtx.createGain();
-  noiseGain.gain.setValueAtTime(velocity * 0.25, time);
+  noiseGain.gain.setValueAtTime(0.01, time);
+  noiseGain.gain.exponentialRampToValueAtTime(velocity * 0.3, time + 0.002); // Fast attack
   noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
 
   // Tone component
@@ -1692,7 +1773,8 @@ function playSnare(time, velocity) {
   const oscGain = audioCtx.createGain();
 
   osc.frequency.value = 180;
-  oscGain.gain.setValueAtTime(velocity * 0.15, time);
+  oscGain.gain.setValueAtTime(0.01, time);
+  oscGain.gain.exponentialRampToValueAtTime(velocity * 0.2, time + 0.002); // Fast attack
   oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
 
   noise.connect(noiseFilter);
@@ -1717,7 +1799,8 @@ function playRimShot(time, velocity) {
   osc1.frequency.value = 400;
   osc2.frequency.value = 1200;
 
-  gain.gain.setValueAtTime(velocity * 0.4, time);
+  gain.gain.setValueAtTime(0.01, time);
+  gain.gain.exponentialRampToValueAtTime(velocity * 0.4, time + 0.001); // Very fast attack
   gain.gain.exponentialRampToValueAtTime(0.01, time + 0.03);
 
   osc1.connect(gain);
@@ -1739,7 +1822,8 @@ function playTom(time, freq, velocity) {
   osc.frequency.setValueAtTime(freq, time);
   osc.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.08);
 
-  gain.gain.setValueAtTime(velocity * 0.6, time);
+  gain.gain.setValueAtTime(0.01, time);
+  gain.gain.exponentialRampToValueAtTime(velocity * 0.6, time + 0.002); // Fast attack
   gain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
 
   osc.connect(gain);
@@ -1764,7 +1848,8 @@ function playHat(time, velocity, duration) {
   filter.frequency.value = 7000;
 
   const gain = audioCtx.createGain();
-  gain.gain.setValueAtTime(velocity * 0.2, time);
+  gain.gain.setValueAtTime(0.01, time);
+  gain.gain.exponentialRampToValueAtTime(velocity * 0.25, time + 0.001); // Very fast attack
   gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
 
   noise.connect(filter);
@@ -1775,17 +1860,24 @@ function playHat(time, velocity, duration) {
   scheduledNodes.push(noise);
 }
 
-function schedulePattern(stem, startTime, isBass) {
+function schedulePattern(stem, startTime, isBass, minTime = -Infinity, maxTime = Infinity) {
   if (!audioCtx || !stem) return;
+
+  // Stem times are in seconds (at 120 BPM reference tempo)
+  // Keep music at constant tempo - don't scale with game BPM
+  // The visual beat grid can speed up, but the music stays groovy
 
   stem.forEach(note => {
     const [time, midi, velocity, duration] = note;
     const absoluteTime = startTime + time;
 
-    if (isBass) {
-      playBassNote(absoluteTime, midi, velocity, duration);
-    } else {
-      playDrum(absoluteTime, midi, velocity, duration);
+    // Only schedule notes within the allowed time range
+    if (time >= minTime && time < maxTime) {
+      if (isBass) {
+        playBassNote(absoluteTime, midi, velocity, duration);
+      } else {
+        playDrum(absoluteTime, midi, velocity, duration);
+      }
     }
   });
 }
